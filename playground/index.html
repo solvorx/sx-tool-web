@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>sx-tool-web · playground</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --sx-color-primary: #4f46e5;
+        --sx-radius: 8px;
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 1.5rem;
+        max-width: 72rem;
+        margin-inline: auto;
+        line-height: 1.4;
+      }
+
+      h1 {
+        font-size: 1.1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .tab-id {
+        font-size: 0.7rem;
+        font-weight: 400;
+        padding: 0.1rem 0.4rem;
+        border-radius: 999px;
+        background: color-mix(in srgb, currentColor 12%, transparent);
+      }
+
+      h2 {
+        font-size: 0.9rem;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        opacity: 0.7;
+        margin: 0 0 0.5rem;
+      }
+
+      section {
+        border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+        border-radius: var(--sx-radius);
+        padding: 1rem;
+        margin-bottom: 1rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+      }
+
+      @media (max-width: 55rem) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      label {
+        display: block;
+        font-size: 0.8rem;
+        margin-top: 0.5rem;
+      }
+
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0.4rem 0.5rem;
+        border-radius: 6px;
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        background: transparent;
+        color: inherit;
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+        padding: 0.5rem 0.8rem;
+        border-radius: 6px;
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        background: transparent;
+        color: inherit;
+        font: inherit;
+      }
+
+      button:hover {
+        background: color-mix(in srgb, currentColor 8%, transparent);
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+
+      pre {
+        background: color-mix(in srgb, currentColor 6%, transparent);
+        border-radius: 6px;
+        padding: 0.6rem;
+        overflow: auto;
+        font-size: 0.8rem;
+        max-height: 12rem;
+      }
+
+      #log {
+        font-family: ui-monospace, monospace;
+        font-size: 0.75rem;
+        max-height: 22rem;
+      }
+
+      .log-line {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .log-line time {
+        opacity: 0.55;
+        margin-right: 0.5rem;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 0.1rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+
+      .badge.loading {
+        background: color-mix(in srgb, orange 30%, transparent);
+      }
+
+      .badge.authenticated {
+        background: color-mix(in srgb, green 30%, transparent);
+      }
+
+      .badge.unauthenticated {
+        background: color-mix(in srgb, gray 30%, transparent);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>sx-tool-web · playground <span class="tab-id" id="tab-id">…</span></h1>
+    <p>
+      Verificación manual contra SXMS real. No es parte del paquete publicado -<code>files: ["dist"]</code>
+      lo excluye del tarball de npm-. Ver <code>README.md</code>, sección "Probar contra el stack local".
+    </p>
+
+    <section>
+      <h2>Config</h2>
+      <form id="config-form" class="grid">
+        <div>
+          <label for="issuer">issuer</label>
+          <input id="issuer" name="issuer" required />
+          <label for="clientId">clientId</label>
+          <input id="clientId" name="clientId" required />
+          <label for="redirectUri">redirectUri</label>
+          <input id="redirectUri" name="redirectUri" required />
+        </div>
+        <div>
+          <p style="font-size: 0.8rem; opacity: 0.75">
+            Cambiar acá y guardar crea un <code>SolvorxClient</code> nuevo con esta config
+            -<code>localStorage['sx-playground-config']</code> la recuerda entre recargas-. El cliente
+            OAuth <code>sx-console-web</code> ya viene seedeado en <code>sx-management-service</code>
+            con estos defaults, público, con PKCE.
+          </p>
+          <button type="submit">Guardar y reiniciar cliente</button>
+        </div>
+      </form>
+    </section>
+
+    <section>
+      <h2>Componentes</h2>
+      <div class="actions">
+        <sx-login-button>Iniciar sesión</sx-login-button>
+        <sx-user-menu></sx-user-menu>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div>
+        <h2>Estado</h2>
+        <p>status: <span class="badge" id="status-badge">…</span></p>
+        <pre id="user-json">null</pre>
+        <p id="refresh-token-presence"></p>
+      </div>
+      <div>
+        <h2>Acciones</h2>
+        <div class="actions">
+          <button id="btn-get-token">getAccessToken()</button>
+          <button id="btn-concurrency">3× getAccessToken() en paralelo</button>
+          <button id="btn-sessions">GET /v1/bff-account/session</button>
+          <button id="btn-open-tabs">Abrir 6 pestañas</button>
+          <button id="btn-login-force">login({ prompt: 'login' })</button>
+          <button id="btn-logout">logout()</button>
+        </div>
+        <pre id="action-result">-</pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Log en vivo</h2>
+      <div id="log"></div>
+    </section>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
