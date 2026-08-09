@@ -1,7 +1,8 @@
 # @solvorx/sx-tool-web
 
 Integración de identidad de SolvorX para apps web: login, sesión persistente, datos del usuario y
-logout contra `sx-management-service` (SXMS), sin backend propio y sin volver a escribir PKCE.
+logout contra `sx-management-service` (SXMS), sin volver a escribir PKCE. Cliente público para apps
+sin backend propio, y cliente confidencial (subpath `./server`) para apps que sí lo tienen.
 
 TypeScript vanilla, **cero dependencias de runtime**. Funciona desde JS plano, React, Vue o Angular.
 
