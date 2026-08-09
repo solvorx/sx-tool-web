@@ -32,9 +32,18 @@ Romper cualquiera de estas produce bugs que no dan error, o agujeros de segurida
    no por pestaña -es lo que lo hace comparable al lock de Redis de
    `sx-account-web/src/lib/auth/session-store.server.ts`, y no un mutex local que solo protegería
    contra llamadas concurrentes de una misma pestaña. Ver `session/refresh.ts`.
-2. **Nunca se manda `client_secret`.** Este paquete es para clientes **públicos**: mandar uno hace
-   que SXMS responda `invalid_client` (`oauth-client.service.ts:authenticateClient`). La garantía es
-   PKCE, `S256` únicamente.
+2. **El barril de navegador (`index.ts`) nunca manda `client_secret`.** Es para clientes
+   **públicos**: mandar uno hace que SXMS responda `invalid_client`
+   (`oauth-client.service.ts:authenticateClient`). La garantía ahí es PKCE, `S256` únicamente.
+   `SolvorxClientOptions` (`config/options.ts`) no tiene ni puede tener un campo `clientSecret` -es
+   lo que hace estructuralmente imposible que el secreto llegue a un bundle de cliente. El barril de
+   **servidor** (`server/index.ts`, subpath `@solvorx/sx-tool-web/server`) es la única excepción: ahí
+   `clientSecret` es un campo válido de `SolvorxServerClientOptions`, para el caso de un cliente
+   confidencial con backend propio (ver `sx-account-web`, que lo usa). `scripts/check-package.mjs`
+   verifica que el artefacto compilado del barril de navegador no exponga
+   `createSolvorxServerClient` ni nada de esa superficie. Esta es la regla que más fácil se rompe sin
+   querer: cualquier cambio que agregue `clientSecret` a `oauth/endpoints.ts` tiene que dejarlo
+   opcional y sin usarlo desde `core/client.ts` ni `config/options.ts`.
 3. **El `state` se compara antes de canjear el código**, nunca después. Es la única defensa contra
    que alguien inyecte un código ajeno en la sesión. Está en `core/client.ts#completeCallback`.
 4. **El access token no se escribe en storage.** Vive en memoria de `session/refresh.ts`. En
@@ -79,14 +88,21 @@ Romper cualquiera de estas produce bugs que no dan error, o agujeros de segurida
 
 ```
 src/
-├── index.ts          # única superficie pública
+├── index.ts          # única superficie pública del barril de navegador
+├── server/            index.ts (única superficie pública del barril `./server`, para clientes confidenciales)
 ├── config/           options.ts (normaliza y valida SolvorxClientOptions)
-├── core/              client.ts (la máquina de estados + API pública) · state.ts (store mínimo)
+├── core/              client.ts (la máquina de estados + API pública + createSolvorxBffClient) · state.ts (store mínimo)
 ├── oauth/             pkce · endpoints (fetch contra /v1/public/oauth/*) · transaction · claims
 ├── session/           token-store (interfaz TokenStorage + 3 impls) · refresh (el lock) · sync (BroadcastChannel)
 ├── http/              request (fetch + unwrap de los dos formatos de respuesta) · error (SolvorxError)
 └── ui/                login-button · user-menu (+ mountUserMenu) · avatar · styles (CSS custom properties)
 ```
+
+- `server/index.ts` no duplica lógica de OAuth: `createSolvorxServerClient` es una fachada delgada sobre
+  `oauth/endpoints.ts` que agrega `clientSecret` al llamar. No toca DOM, storage ni cookies -eso es
+  responsabilidad de la app que lo consume (ver `sx-account-web`). Reexporta lo que no depende de DOM
+  (`pkce`, `sanitizeReturnTo`, `claims`, `SolvorxError` + predicados, los tipos) para no forzar a
+  quien tiene un backend a importar del barril de navegador.
 
 - `http/request.ts` tiene **dos** funciones porque SXMS tiene dos formatos de respuesta: `request()`
   desenvuelve el envelope de la casa (`{traceId, success, message, result}, hoy sin uso real -queda
@@ -119,7 +135,14 @@ src/
   (`http/error.test.ts`).
 - `core/client.test.ts`: el flujo de callback completo (canje, limpieza de URL, `state` mismatch), la
   protección contra el doble montaje de StrictMode, y que `logout()` no rompe si el paso de SSO
-  falla.
+  falla. `logout({ scope: 'here' })` no debe llamar a `ssoLogout`.
+- `server/index.test.ts`: que `clientSecret` viaje en `exchangeCode`/`refreshTokens`/`revokeToken`
+  cuando está configurado, y que no viaje cuando no lo está -es la superficie que existe
+  específicamente para eso, así que es la que más falta que la cubra un test.
+- `ui/user-menu.test.ts`: las dos salidas del menú llaman a `logout()` con el `scope` que
+  corresponde, los labels custom pisan los defaults sin romper los que no se pisan, el foco entra al
+  panel al abrir, y `createSolvorxBffClient` funciona como `SolvorxSessionSource` sin ningún token en
+  el navegador (se stubea `fetch` global, nunca `oauth/endpoints.ts`).
 
 Para mockear `../oauth/endpoints` en un test: `vi.mock('../oauth/endpoints', async (importOriginal)
 => ({ ...(await importOriginal()), exchangeCode: vi.fn(), ... }))`, para conservar `buildAuthorizeUrl`
@@ -148,7 +171,7 @@ respecto.
 
 | Qué | Dónde |
 |---|---|
-| Lógica portada (versión sin extraer) | `../sx-account-web/src/lib/auth/` y `../sx-account-web/src/lib/api/` |
+| Consumidor del barril `./server` (cliente confidencial + BFF) | `../sx-account-web`, vía `createSolvorxServerClient` (`src/lib/api/oauth.ts` antes de migrar) y `createSolvorxBffClient` (`src/layouts/app-layout.tsx`) |
 | Convenciones del backend sobre OAuth | `../sx-management-service/docs/OAUTH-CLIENTS.md`, `docs/AUTH-FLOWS.md` |
 | Cliente OAuth de prueba (ya seedeado) | `sx-console-web`, público, PKCE, `redirect_uri = http://localhost:3002/callback` -ver `../sx-management-service/prisma/seed.ts` |
 | Swagger de los endpoints usados | `http://localhost:9000/documentation/public` (una vez con SXMS corriendo) |

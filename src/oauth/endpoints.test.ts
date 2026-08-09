@@ -150,6 +150,35 @@ describe('exchangeCode / refreshTokens / revokeToken / userinfo / ssoLogout', ()
     expect(body.get('client_id')).toBe('sx-console-web')
   })
 
+  describe('clientSecret opcional -solo lo usa el barril de servidor', () => {
+    it('exchangeCode manda client_secret cuando se lo pasan', async () => {
+      await exchangeCode(ISSUER, {
+        clientId: 'sx-account-web',
+        clientSecret: 'the-secret',
+        redirectUri: 'http://localhost:3001/api/auth/callback',
+        code: 'the-code',
+        codeVerifier: 'the-verifier',
+      })
+
+      const body = bodyParams(lastFetchCall()[1])
+      expect(body.get('client_secret')).toBe('the-secret')
+    })
+
+    it('refreshTokens manda client_secret cuando se lo pasan', async () => {
+      await refreshTokens(ISSUER, 'sx-account-web', 'the-refresh-token', 'the-secret')
+
+      const body = bodyParams(lastFetchCall()[1])
+      expect(body.get('client_secret')).toBe('the-secret')
+    })
+
+    it('revokeToken manda client_secret cuando se lo pasan', async () => {
+      await revokeToken(ISSUER, 'sx-account-web', 'the-access-token', 'the-secret')
+
+      const body = bodyParams(lastFetchCall()[1])
+      expect(body.get('client_secret')).toBe('the-secret')
+    })
+  })
+
   it('userinfo: GET con Authorization Bearer', async () => {
     await userinfo(ISSUER, 'the-access-token')
 

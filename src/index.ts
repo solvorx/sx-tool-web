@@ -4,8 +4,14 @@
  * rutas internas, que quedan libres de reorganizar sin romper a nadie.
  */
 
-export { createSolvorxClient, getDefaultClient, setDefaultClient } from './core/client'
-export type { LoginOptions, SolvorxClient } from './core/client'
+export { createSolvorxBffClient, createSolvorxClient, getDefaultClient, setDefaultClient } from './core/client'
+export type {
+  LoginOptions,
+  LogoutOptions,
+  SolvorxBffClientOptions,
+  SolvorxClient,
+  SolvorxSessionSource,
+} from './core/client'
 export type { AuthStatus, StateListener } from './core/state'
 
 export type { ResolvedOptions, SolvorxClientOptions, StorageMode } from './config/options'
@@ -33,7 +39,7 @@ export type { AccessTokenClaims } from './oauth/claims'
 
 export { SxLoginButton } from './ui/login-button'
 export { SxUserMenu, mountUserMenu } from './ui/user-menu'
-export type { MountUserMenuOptions } from './ui/user-menu'
+export type { MountUserMenuOptions, UserMenuLabels, UserMenuOptions } from './ui/user-menu'
 
 import { SxLoginButton } from './ui/login-button'
 import { SxUserMenu } from './ui/user-menu'

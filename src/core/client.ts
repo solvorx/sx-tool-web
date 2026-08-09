@@ -14,7 +14,36 @@ export interface LoginOptions {
   prompt?: 'login'
 }
 
-export interface SolvorxClient {
+export interface LogoutOptions {
+  /**
+   * `'here'`: solo cierra la sesión de esta app -no toca la cookie SSO, así
+   * que volver a entrar no vuelve a pedir contraseña. `'everywhere'`: además
+   * cierra la sesión SSO, y con ella todas las apps que nacieron de ese
+   * login. Default: `'everywhere'` -es el comportamiento histórico de
+   * `logout()`, que no cambia para quien no pasa esta opción.
+   */
+  scope?: 'here' | 'everywhere'
+}
+
+/**
+ * Lo que `<sx-user-menu>` y `mountUserMenu()` necesitan para renderizarse:
+ * solo lectura de sesión y logout, nada de tokens. La interfaz angosta es lo
+ * que permite que una app con BFF -cuyo navegador nunca tiene un access
+ * token- use el mismo elemento vía `createSolvorxBffClient()`.
+ * `SolvorxClient` la satisface sin cambios: es un cambio retrocompatible.
+ */
+export interface SolvorxSessionSource {
+  /** Destino resuelto del botón "Mi cuenta". */
+  readonly accountUrl: string
+  /** `'loading'` antes de que `init()` resuelva. */
+  getStatus(): AuthStatus
+  /** El usuario autenticado, o `null`. Sincrónico. */
+  currentUser(): UserInfo | null
+  subscribe(listener: StateListener): () => void
+  logout(options?: LogoutOptions): Promise<void>
+}
+
+export interface SolvorxClient extends SolvorxSessionSource {
   /**
    * Único punto de entrada asíncrono. Si la URL trae `code`+`state`, resuelve
    * el callback; si no, rehidrata desde el refresh token guardado; si no hay
@@ -23,16 +52,8 @@ export interface SolvorxClient {
   init(): Promise<void>
   /** Redirect top-level a `/authorize`. No hace falta `await`: la navegación corta la ejecución -pero es awaitable, por si hace falta esperar a que la URL esté armada, como en los tests. */
   login(options?: LoginOptions): Promise<void>
-  /** El usuario autenticado, o `null`. Sincrónico: lee del estado ya resuelto por `init()`. */
-  currentUser(): UserInfo | null
-  /** `'loading'` antes de que `init()` resuelva. */
-  getStatus(): AuthStatus
   /** Token vigente; renueva bajo lock si hace falta. Lanza `SolvorxError` con `code: 'client/no-session'` si no hay sesión. */
   getAccessToken(): Promise<string>
-  logout(): Promise<void>
-  subscribe(listener: StateListener): () => void
-  /** Destino resuelto del botón "Mi cuenta". */
-  readonly accountUrl: string
 }
 
 export function createSolvorxClient(options: SolvorxClientOptions): SolvorxClient {
@@ -191,7 +212,8 @@ export function createSolvorxClient(options: SolvorxClientOptions): SolvorxClien
     window.location.assign(url)
   }
 
-  async function logout(): Promise<void> {
+  async function logout(logoutOptions: LogoutOptions = {}): Promise<void> {
+    const scope = logoutOptions.scope ?? 'everywhere'
     const current = refresh.getCurrent()
 
     // Bearer: siempre funciona, sin importar el dominio de esta app.
@@ -201,7 +223,10 @@ export function createSolvorxClient(options: SolvorxClientOptions): SolvorxClien
 
     // Cookie de sesión SSO: solo funciona si viaja -mismo site que auth.solvorx.com-.
     // Ver la limitación documentada en el README. Best-effort a propósito.
-    await ssoLogout(config.issuer).catch(() => null)
+    // `scope: 'here'` la omite: es lo que deja la sesión SSO viva a propósito.
+    if (scope === 'everywhere') {
+      await ssoLogout(config.issuer).catch(() => null)
+    }
 
     refresh.clear()
     config.storage.setRefreshToken(null)
@@ -238,4 +263,63 @@ export function getDefaultClient(): SolvorxClient | null {
 /** Normalmente no hace falta llamarla a mano: `createSolvorxClient()` ya se registra sola. */
 export function setDefaultClient(client: SolvorxClient | null): void {
   defaultClient = client
+}
+
+export interface SolvorxBffClientOptions {
+  /** Hidratado por el Server Component que ya llamó a `requireSession()`; `null` si no hay sesión. */
+  user: UserInfo | null
+  /** Destino del botón "Mi cuenta" de `<sx-user-menu>`. */
+  accountUrl: string
+  /**
+   * Endpoint propio de la app que cierra la sesión del BFF -revoca el
+   * refresh token del lado del servidor y borra la cookie de sesión. P. ej.
+   * `/api/auth/logout`. Este cliente nunca ve el refresh token: vive en el
+   * store del servidor (Redis, o lo que use la app), no acá.
+   */
+  logoutUrl: string
+  /** Base del Authorization Server, para el logout de SSO. Igual que `issuer` en `createSolvorxClient`. */
+  issuer: string
+}
+
+/**
+ * Cliente para apps con backend propio: el navegador nunca tiene un access
+ * ni un refresh token, así que no hay `init()`, `login()` ni
+ * `getAccessToken()` -esos pasos ya los resolvió el servidor antes de
+ * hidratar `user`. Solo implementa `SolvorxSessionSource`: lo justo para que
+ * `<sx-user-menu>` y `mountUserMenu()` funcionen igual que con
+ * `createSolvorxClient()`.
+ *
+ * No se registra como cliente default (`setDefaultClient`): ese mecanismo es
+ * de `SolvorxClient` completo, que es lo que espera `<sx-login-button>`. Acá
+ * quien integra asigna el cliente explícitamente por la propiedad `.client`.
+ */
+export function createSolvorxBffClient(options: SolvorxBffClientOptions): SolvorxSessionSource {
+  const issuer = options.issuer.replace(/\/+$/, '')
+  const store = createStore({
+    status: options.user ? 'authenticated' : 'unauthenticated',
+    user: options.user,
+  })
+
+  async function logout(logoutOptions: LogoutOptions = {}): Promise<void> {
+    const scope = logoutOptions.scope ?? 'everywhere'
+
+    // Le pega a la propia app -ahí vive el refresh token, este cliente nunca lo ve.
+    await fetch(options.logoutUrl, { method: 'POST' }).catch(() => null)
+
+    // Cookie de sesión SSO: mismo best-effort y misma limitación cross-site
+    // que `createSolvorxClient().logout()`. Ver el README.
+    if (scope === 'everywhere') {
+      await ssoLogout(issuer).catch(() => null)
+    }
+
+    store.setState({ status: 'unauthenticated', user: null })
+  }
+
+  return {
+    accountUrl: options.accountUrl,
+    getStatus: () => store.getState().status,
+    currentUser: () => store.getState().user,
+    subscribe: (listener) => store.subscribe(listener),
+    logout,
+  }
 }

@@ -288,4 +288,25 @@ describe('logout', () => {
     await expect(client.logout()).resolves.toBeUndefined()
     expect(client.getStatus()).toBe('unauthenticated')
   })
+
+  it('con scope "here" revoca el access token pero no toca la sesión SSO', async () => {
+    const storage = createMemoryTokenStorage()
+    storage.setRefreshToken('stored-refresh')
+    refreshTokensMock.mockResolvedValue({
+      access_token: 'access-1',
+      token_type: 'Bearer',
+      expires_in: 600,
+      refresh_token: 'refresh-2',
+    })
+    userinfoMock.mockResolvedValue(fakeUser())
+
+    const client = createSolvorxClient({ ...baseOptions, storage })
+    await client.init()
+
+    await client.logout({ scope: 'here' })
+
+    expect(revokeTokenMock).toHaveBeenCalledWith('http://localhost:9000', 'sx-console-web', 'access-1')
+    expect(ssoLogoutMock).not.toHaveBeenCalled()
+    expect(client.getStatus()).toBe('unauthenticated')
+  })
 })

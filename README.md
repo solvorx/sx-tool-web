@@ -9,18 +9,14 @@ TypeScript vanilla, **cero dependencias de runtime**. Funciona desde JS plano, R
 
 ## Instalación
 
-Tres formas, según el estado real del paquete:
+```bash
+pnpm add @solvorx/sx-tool-web
+```
+
+Para desarrollar contra el repo clonado como hermano del tuyo, sin esperar a un publish -requiere
+buildear antes: el `exports` del paquete apunta a `dist/`, que no viaja en git:
 
 ```bash
-# 1. Desde npm -una vez publicado bajo el scope @solvorx-. Todavía no lo está.
-pnpm add @solvorx/sx-tool-web
-
-# 2. Por git, contra el repo ya subido -funciona en cuanto exista y sea accesible
-#    para quien instala (público, o con acceso si es privado).
-pnpm add git+https://github.com/solvorx/sx-tool-web.git
-
-# 3. Por ruta local, para desarrollar contra el repo clonado como hermano del tuyo.
-#    Requiere buildear antes: el `exports` del paquete apunta a `dist/`, que no viaja en git.
 cd ../sx-tool-web && pnpm install && pnpm build
 pnpm add ../sx-tool-web
 ```
@@ -124,14 +120,80 @@ abiertas, y recargar la página no dispara un redirect completo.
 El costo es real, sin adornos: **un XSS se lleva la sesión.** El propio BCP lo dice sin vueltas:
 *"There are no practical security mechanisms for frontend applications that counter this attack
 scenario."* Por eso `storage` es configurable. Si tu app puede pagar un backend propio, el patrón
-superior es un BFF que guarde el refresh token server-side -es lo que hace `sx-account-web` en este
-mismo monorepo (`src/lib/auth/session-store.server.ts`); ese es el tier que corresponde si el
-riesgo de XSS no es aceptable para tu caso.
+superior es un BFF que guarde el refresh token server-side -y ese patrón también es este paquete,
+por el subpath `@solvorx/sx-tool-web/server` (ver la sección de abajo). No es un "hacelo vos": es
+el tier que corresponde si el riesgo de XSS no es aceptable para tu caso, y es lo que usa
+`sx-account-web` en este mismo monorepo.
 
 El refresh se serializa con `navigator.locks`, scopeado por origen y compartido entre todas las
 pestañas -no un mutex de una sola pestaña-, con re-lectura del storage adentro del lock antes de
 llamar a la red. Sin esto, dos renovaciones concurrentes con el mismo refresh token rotado
 desloguearían gente al azar.
+
+---
+
+## Apps con backend propio (`/server`)
+
+Todo lo de arriba -`createSolvorxClient`, `storage`, el riesgo de XSS- es para clientes OAuth
+**públicos**: PKCE, sin `client_secret`, tokens en el navegador. Si tu app tiene un backend propio y
+es un cliente **confidencial** registrado con `client_secret` en SXMS, usá el subpath de servidor en
+vez de pelear con el barril de navegador:
+
+```ts
+// Server-only. No importar esto desde un Client Component ni desde nada que
+// termine en el bundle del navegador -client_secret vive acá y en ningún otro lado.
+import { createSolvorxServerClient } from '@solvorx/sx-tool-web/server'
+
+const sx = createSolvorxServerClient({
+  issuer: process.env.AMS_BASE_URL!,
+  clientId: process.env.OAUTH_CLIENT_ID!,
+  clientSecret: process.env.OAUTH_CLIENT_SECRET!, // omitilo si tu backend es un cliente público
+  redirectUri: process.env.OAUTH_REDIRECT_URI!,
+})
+
+const url = sx.buildAuthorizeUrl({ state, codeChallenge })
+const tokens = await sx.exchangeCode({ code, codeVerifier })
+const fresh = await sx.refreshTokens(refreshToken)
+await sx.revokeToken(accessToken)
+const user = await sx.userinfo(accessToken)
+```
+
+`createSolvorxServerClient` arma URLs y hace los mismos `fetch` que el barril de navegador -mismo
+`oauth/endpoints.ts` por dentro-, con `client_secret` en el body cuando lo configurás. No toca DOM,
+storage ni cookies: dónde guardás la sesión (Redis, una cookie firmada, lo que sea), el lock de
+refresh entre requests concurrentes, y las cookies HTTP-only son responsabilidad de tu app, no de
+este paquete. `sx-account-web` (`src/lib/auth/`, `src/lib/api/oauth.ts` antes de migrar) es el
+ejemplo real: Redis para la sesión, un lock distribuido para el refresh, cookies `__Host-*`.
+
+El subpath también reexporta lo que no depende de DOM y sirve tanto del lado del servidor como del
+navegador: `createCodeVerifier`/`createState`/`deriveCodeChallenge` (PKCE), `sanitizeReturnTo`,
+`readAccessTokenClaims`, `SolvorxError` + los predicados (`isForbidden`, `isRateLimited`,
+`isSessionMissing`, `isUnauthorized`), y los tipos `TokenResponse`/`UserInfo`/`AccessTokenClaims`.
+
+### `<sx-user-menu>` sin tokens en el navegador
+
+Una app con BFF no tiene un access token en el cliente para pasarle a `createSolvorxClient()`, pero
+igual puede usar `<sx-user-menu>`: `createSolvorxBffClient()` (en el barril de **navegador**, no en
+`/server`) arma la misma interfaz que consume el componente a partir del usuario ya resuelto por tu
+Server Component, sin manejar ningún token:
+
+```ts
+import { createSolvorxBffClient, registerSolvorxElements } from '@solvorx/sx-tool-web'
+
+const sx = createSolvorxBffClient({
+  user, // UserInfo | null, hidratado por tu Server Component -ya pasó por requireSession() o el equivalente
+  accountUrl: '/profile',
+  logoutUrl: '/api/auth/logout', // tu propio endpoint: revoca el refresh token y borra tu cookie/sesión
+  issuer: process.env.NEXT_PUBLIC_AMS_BASE_URL!, // para el logout de SSO, best-effort igual que en el cliente público
+})
+
+registerSolvorxElements()
+document.querySelector('sx-user-menu').client = sx
+```
+
+`logout()` -y las dos salidas del menú, "acá" vs "en todas las apps"- le pegan a `logoutUrl` (tu
+propia app) y, si corresponde, al logout de SSO del `issuer`; nunca ven un refresh token, porque
+nunca lo tuvieron.
 
 ---
 

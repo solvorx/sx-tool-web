@@ -1,4 +1,4 @@
-import { getDefaultClient, type SolvorxClient } from '../core/client'
+import { getDefaultClient, type SolvorxSessionSource } from '../core/client'
 import type { AuthStatus } from '../core/state'
 import type { UserInfo } from '../oauth/endpoints'
 import { createAvatarElement } from './avatar'
@@ -48,7 +48,7 @@ const MENU_STYLES = `
     position: absolute;
     top: calc(100% + 0.375rem);
     right: 0;
-    min-width: 14rem;
+    min-width: 16rem;
     padding: 0.75rem;
     border: 1px solid var(--sx-color-border);
     border-radius: var(--sx-radius);
@@ -72,8 +72,7 @@ const MENU_STYLES = `
     white-space: nowrap;
   }
 
-  [part='account-link'],
-  [part='logout-button'] {
+  [part='account-link'] {
     display: block;
     width: 100%;
     padding: 0.5em;
@@ -83,15 +82,73 @@ const MENU_STYLES = `
     margin-top: 0.25rem;
   }
 
-  [part='account-link']:hover,
-  [part='logout-button']:hover {
+  [part='account-link']:hover {
     background: color-mix(in srgb, var(--sx-color-fg) 6%, transparent);
   }
 
-  [part='logout-button'] {
-    color: var(--sx-color-danger);
+  [part='logout-here-button'],
+  [part='logout-everywhere-button'] {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.125rem;
+    width: 100%;
+    padding: 0.5em;
+    border: none;
+    border-top: 1px solid var(--sx-color-border);
+    border-radius: 0;
+    text-align: left;
+    margin-top: 0.25rem;
+  }
+
+  [part='logout-here-button']:hover,
+  [part='logout-everywhere-button']:hover {
+    background: color-mix(in srgb, var(--sx-color-fg) 6%, transparent);
+  }
+
+  .sx-item-title {
+    font-size: 0.9em;
+    font-weight: 600;
+  }
+
+  .sx-item-description {
+    color: var(--sx-color-fg-muted);
+    font-size: 0.8em;
   }
 `
+
+/**
+ * Copy del menú. Default en español -mismo criterio que el resto del
+ * paquete-, pensado para no atarse a ninguna app en particular ("esta app",
+ * no "Mi cuenta"). Quien integra puede pisar cualquier subconjunto vía la
+ * opción `labels` de `mountUserMenu()` o la propiedad `.labels` del elemento.
+ */
+export interface UserMenuLabels {
+  accountLink: string
+  signOutHereTitle: string
+  signOutHereDescription: string
+  signOutEverywhereTitle: string
+  signOutEverywhereDescription: string
+}
+
+const DEFAULT_LABELS: UserMenuLabels = {
+  accountLink: 'Mi cuenta',
+  signOutHereTitle: 'Cerrar sesión acá',
+  signOutHereDescription: 'Salís de esta app. Seguís con la sesión iniciada en el resto de las apps de SolvorX.',
+  signOutEverywhereTitle: 'Cerrar sesión en todas las apps',
+  signOutEverywhereDescription: 'Salís también de las demás apps de SolvorX.',
+}
+
+export interface UserMenuOptions {
+  /** Pisa cualquier subconjunto de `DEFAULT_LABELS`. */
+  labels?: Partial<UserMenuLabels>
+  /**
+   * `target` del link "Mi cuenta". Default `'_blank'` -el caso normal, cuando
+   * `accountUrl` apunta a otra app. Usar `'_self'` cuando la app que integra
+   * *es* la cuenta -por ejemplo, un link a la propia sección de perfil.
+   */
+  accountLinkTarget?: '_self' | '_blank'
+}
 
 interface UserMenuView {
   details: HTMLDetailsElement
@@ -101,10 +158,15 @@ interface UserMenuView {
   profileEmail: HTMLElement
   profileUsername: HTMLElement
   accountLink: HTMLAnchorElement
-  logoutButton: HTMLButtonElement
+  logoutHereButton: HTMLButtonElement
+  logoutEverywhereButton: HTMLButtonElement
+  /** Primer elemento focuseable del panel, en el orden en que aparece -a donde va el foco al abrir. */
+  firstFocusable: HTMLElement
 }
 
-function buildView(root: ShadowRoot): UserMenuView {
+function buildView(root: ShadowRoot, options: UserMenuOptions): UserMenuView {
+  const labels = { ...DEFAULT_LABELS, ...options.labels }
+
   const style = document.createElement('style')
   style.textContent = `${sharedStyles}\n${MENU_STYLES}`
 
@@ -135,29 +197,67 @@ function buildView(root: ShadowRoot): UserMenuView {
 
   const accountLink = document.createElement('a')
   accountLink.setAttribute('part', 'account-link')
-  accountLink.textContent = 'Mi cuenta'
-  accountLink.target = '_blank'
+  accountLink.textContent = labels.accountLink
+  accountLink.target = options.accountLinkTarget ?? '_blank'
   accountLink.rel = 'noopener'
 
-  const logoutButton = document.createElement('button')
-  logoutButton.setAttribute('part', 'logout-button')
-  logoutButton.type = 'button'
-  logoutButton.textContent = 'Cerrar sesión'
+  // Dos salidas separadas, con el alcance de cada una escrito -no insinuado-:
+  // quien está en una máquina prestada y ve un único "cerrar sesión" se va
+  // creyendo que salió de todo. Ver AGENTS.md y el comentario de
+  // `core/client.ts#LogoutOptions`.
+  const logoutHereButton = buildLogoutItem('logout-here-button', labels.signOutHereTitle, labels.signOutHereDescription)
+  const logoutEverywhereButton = buildLogoutItem(
+    'logout-everywhere-button',
+    labels.signOutEverywhereTitle,
+    labels.signOutEverywhereDescription,
+  )
 
-  panel.append(profile, accountLink, logoutButton)
+  panel.append(profile, accountLink, logoutHereButton, logoutEverywhereButton)
   details.append(summary, panel)
   root.append(style, details)
 
-  return { details, triggerAvatar, triggerName, profileName, profileEmail, profileUsername, accountLink, logoutButton }
+  return {
+    details,
+    triggerAvatar,
+    triggerName,
+    profileName,
+    profileEmail,
+    profileUsername,
+    accountLink,
+    logoutHereButton,
+    logoutEverywhereButton,
+    firstFocusable: accountLink,
+  }
+}
+
+function buildLogoutItem(part: string, title: string, description: string): HTMLButtonElement {
+  const button = document.createElement('button')
+  button.setAttribute('part', part)
+  button.type = 'button'
+
+  const titleEl = document.createElement('span')
+  titleEl.className = 'sx-item-title'
+  titleEl.textContent = title
+
+  const descriptionEl = document.createElement('span')
+  descriptionEl.className = 'sx-item-description'
+  descriptionEl.textContent = description
+
+  button.append(titleEl, descriptionEl)
+  return button
 }
 
 /**
  * Arma el menú dentro de `root` y lo mantiene sincronizado con `client`.
  * Único lugar donde vive la lógica: tanto `<sx-user-menu>` como
  * `mountUserMenu()` la llaman, para no mantener dos veces el mismo DOM.
+ *
+ * `client` es la interfaz angosta `SolvorxSessionSource`, no `SolvorxClient`
+ * completo: este componente no necesita tokens, así que también sirve para
+ * una app con BFF vía `createSolvorxBffClient()`.
  */
-export function renderUserMenu(root: ShadowRoot, client: SolvorxClient): () => void {
-  const view = buildView(root)
+export function renderUserMenu(root: ShadowRoot, client: SolvorxSessionSource, options: UserMenuOptions = {}): () => void {
+  const view = buildView(root, options)
   view.accountLink.href = client.accountUrl
 
   function closeMenu(): void {
@@ -173,14 +273,27 @@ export function renderUserMenu(root: ShadowRoot, client: SolvorxClient): () => v
     if (event.key === 'Escape') closeMenu()
   }
 
-  function onLogoutClick(): void {
+  function onToggle(): void {
+    // Al abrir, el foco entra al panel: quien navega con teclado no debería
+    // tener que tabular por toda la página para llegar a la primera opción.
+    if (view.details.open) view.firstFocusable.focus()
+  }
+
+  function onLogoutHereClick(): void {
     closeMenu()
-    void client.logout()
+    void client.logout({ scope: 'here' })
+  }
+
+  function onLogoutEverywhereClick(): void {
+    closeMenu()
+    void client.logout({ scope: 'everywhere' })
   }
 
   document.addEventListener('click', onDocumentClick)
   document.addEventListener('keydown', onKeydown)
-  view.logoutButton.addEventListener('click', onLogoutClick)
+  view.details.addEventListener('toggle', onToggle)
+  view.logoutHereButton.addEventListener('click', onLogoutHereClick)
+  view.logoutEverywhereButton.addEventListener('click', onLogoutEverywhereClick)
 
   function applyUser(user: UserInfo | null): void {
     view.triggerAvatar.replaceChildren(
@@ -207,13 +320,15 @@ export function renderUserMenu(root: ShadowRoot, client: SolvorxClient): () => v
     unsubscribe()
     document.removeEventListener('click', onDocumentClick)
     document.removeEventListener('keydown', onKeydown)
-    view.logoutButton.removeEventListener('click', onLogoutClick)
+    view.details.removeEventListener('toggle', onToggle)
+    view.logoutHereButton.removeEventListener('click', onLogoutHereClick)
+    view.logoutEverywhereButton.removeEventListener('click', onLogoutEverywhereClick)
   }
 }
 
-export interface MountUserMenuOptions {
+export interface MountUserMenuOptions extends UserMenuOptions {
   /** Default: el cliente registrado por el último `createSolvorxClient()`. */
-  client?: SolvorxClient | null
+  client?: SolvorxSessionSource | null
 }
 
 /**
@@ -223,7 +338,8 @@ export interface MountUserMenuOptions {
  * fricción que ganancia-. Devuelve la función de desmontaje.
  */
 export function mountUserMenu(el: HTMLElement, options: MountUserMenuOptions = {}): () => void {
-  const client = options.client ?? getDefaultClient()
+  const { client: clientOption, ...renderOptions } = options
+  const client = clientOption ?? getDefaultClient()
 
   if (!client) {
     console.warn(
@@ -234,20 +350,40 @@ export function mountUserMenu(el: HTMLElement, options: MountUserMenuOptions = {
 
   const root = el.shadowRoot ?? el.attachShadow({ mode: 'open' })
   root.replaceChildren()
-  return renderUserMenu(root, client)
+  return renderUserMenu(root, client, renderOptions)
 }
 
 /** `<sx-user-menu>`: se oculta sola salvo que `status === 'authenticated'`. */
 export class SxUserMenu extends HTMLElementBase {
-  #client: SolvorxClient | null = null
+  #client: SolvorxSessionSource | null = null
+  #options: UserMenuOptions = {}
   #cleanup: (() => void) | null = null
 
-  get client(): SolvorxClient | null {
+  get client(): SolvorxSessionSource | null {
     return this.#client
   }
 
-  set client(value: SolvorxClient | null) {
-    this.#bind(value)
+  set client(value: SolvorxSessionSource | null) {
+    this.#client = value
+    this.#bind()
+  }
+
+  get labels(): Partial<UserMenuLabels> | undefined {
+    return this.#options.labels
+  }
+
+  set labels(value: Partial<UserMenuLabels> | undefined) {
+    this.#options = { ...this.#options, labels: value }
+    this.#bind()
+  }
+
+  get accountLinkTarget(): '_self' | '_blank' | undefined {
+    return this.#options.accountLinkTarget
+  }
+
+  set accountLinkTarget(value: '_self' | '_blank' | undefined) {
+    this.#options = { ...this.#options, accountLinkTarget: value }
+    this.#bind()
   }
 
   connectedCallback(): void {
@@ -259,7 +395,7 @@ export class SxUserMenu extends HTMLElementBase {
     this.#cleanup = null
   }
 
-  #bind(client: SolvorxClient | null): void {
+  #bind(client: SolvorxSessionSource | null = this.#client): void {
     this.#cleanup?.()
     this.#cleanup = null
     this.#client = client
@@ -271,6 +407,6 @@ export class SxUserMenu extends HTMLElementBase {
 
     const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' })
     root.replaceChildren()
-    this.#cleanup = renderUserMenu(root, client)
+    this.#cleanup = renderUserMenu(root, client, this.#options)
   }
 }

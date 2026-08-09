@@ -4,10 +4,12 @@ import { requestRaw } from '../http/request'
  * Authorization server: `/v1/public/oauth/*`.
  *
  * Todos los bodies van como `application/x-www-form-urlencoded` y con los
- * nombres en snake_case, que es lo que fija OAuth 2.0. Nunca se manda
- * `client_secret`: este paquete es para clientes **públicos**
- * (`oauth-client.service.ts` del backend rechaza con `invalid_client` a
- * cualquier cliente público que presente uno). La garantía acá es PKCE.
+ * nombres en snake_case, que es lo que fija OAuth 2.0. `clientSecret` es
+ * opcional y solo lo manda el barril `./server` para clientes
+ * **confidenciales** -el barril de navegador nunca lo pasa, así que un
+ * cliente público sigue sin mandarlo nunca (`oauth-client.service.ts` del
+ * backend rechaza con `invalid_client` a un cliente público que presente
+ * uno). La garantía para clientes públicos sigue siendo PKCE.
  */
 
 const OAUTH_PATH = '/v1/public/oauth'
@@ -82,7 +84,14 @@ export function buildAuthorizeUrl(
  */
 export function exchangeCode(
   issuer: string,
-  params: { clientId: string; redirectUri: string; code: string; codeVerifier: string },
+  params: {
+    clientId: string
+    /** Solo para clientes confidenciales. Nunca debe llegar al bundle del navegador. */
+    clientSecret?: string
+    redirectUri: string
+    code: string
+    codeVerifier: string
+  },
 ): Promise<TokenResponse> {
   return requestRaw<TokenResponse>(`${issuer}${OAUTH_PATH}/token`, {
     method: 'POST',
@@ -90,6 +99,7 @@ export function exchangeCode(
     body: form({
       grant_type: 'authorization_code',
       client_id: params.clientId,
+      ...(params.clientSecret ? { client_secret: params.clientSecret } : {}),
       code: params.code,
       redirect_uri: params.redirectUri,
       code_verifier: params.codeVerifier,
@@ -106,11 +116,21 @@ export function exchangeCode(
  * eso el único llamador de esta función es `session/refresh.ts`, siempre
  * bajo el lock. No llamarla directo desde ningún otro lugar del paquete.
  */
-export function refreshTokens(issuer: string, clientId: string, refreshToken: string): Promise<TokenResponse> {
+export function refreshTokens(
+  issuer: string,
+  clientId: string,
+  refreshToken: string,
+  clientSecret?: string,
+): Promise<TokenResponse> {
   return requestRaw<TokenResponse>(`${issuer}${OAUTH_PATH}/token`, {
     method: 'POST',
     headers: FORM_HEADERS,
-    body: form({ grant_type: 'refresh_token', client_id: clientId, refresh_token: refreshToken }),
+    body: form({
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      ...(clientSecret ? { client_secret: clientSecret } : {}),
+      refresh_token: refreshToken,
+    }),
   })
 }
 
@@ -122,11 +142,20 @@ export function refreshTokens(issuer: string, clientId: string, refreshToken: st
  * 'access'`; mandarle acá el refresh token es un no-op silencioso que deja
  * la sesión de proyecto viva.
  */
-export async function revokeToken(issuer: string, clientId: string, accessToken: string): Promise<void> {
+export async function revokeToken(
+  issuer: string,
+  clientId: string,
+  accessToken: string,
+  clientSecret?: string,
+): Promise<void> {
   await requestRaw<Record<string, never>>(`${issuer}${OAUTH_PATH}/revoke`, {
     method: 'POST',
     headers: FORM_HEADERS,
-    body: form({ token: accessToken, client_id: clientId }),
+    body: form({
+      token: accessToken,
+      client_id: clientId,
+      ...(clientSecret ? { client_secret: clientSecret } : {}),
+    }),
   })
 }
 

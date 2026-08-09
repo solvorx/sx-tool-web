@@ -28,6 +28,7 @@ describe('index · contrato de la superficie pública', () => {
       'createLocalStorageTokenStorage',
       'createMemoryTokenStorage',
       'createSessionStorageTokenStorage',
+      'createSolvorxBffClient',
       'createSolvorxClient',
       'getDefaultClient',
       'isForbidden',
