@@ -18,13 +18,13 @@ describe('readAccessTokenClaims', () => {
    * caracteres sueltos de la tabla latin-1.
    */
   it('decodifica nombres con acentos sin corromperlos', () => {
-    const token = fakeJwt({ sub: 1, sid: 2, pCode: 'sx_management', exp: 1999999999, roles: ['user'] })
+    const token = fakeJwt({ sub: 'usr-001', sid: 2, pCode: 'sx_management', exp: 1999999999, roles: ['user'] })
     // el claim de nombre no forma parte de AccessTokenClaims, pero probamos el
     // mismo mecanismo de decodeSegment vía un campo real: pCode con acentos.
-    const withAccents = fakeJwt({ sub: 1, sid: 2, pCode: 'proyecto_ñoño_é', exp: null, roles: [] })
+    const withAccents = fakeJwt({ sub: 'usr-001', sid: 2, pCode: 'proyecto_ñoño_é', exp: null, roles: [] })
 
     expect(readAccessTokenClaims(token)).toEqual({
-      sub: 1,
+      sub: 'usr-001',
       sid: 2,
       pCode: 'sx_management',
       exp: 1999999999,
@@ -42,14 +42,19 @@ describe('readAccessTokenClaims', () => {
   })
 
   it('devuelve null si faltan sub o sid', () => {
-    const token = fakeJwt({ sub: 1, roles: [] })
+    const token = fakeJwt({ sub: 'usr-001', roles: [] })
+    expect(readAccessTokenClaims(token)).toBeNull()
+  })
+
+  it('devuelve null si sub no es un string', () => {
+    const token = fakeJwt({ sub: 1, sid: 2, roles: [] })
     expect(readAccessTokenClaims(token)).toBeNull()
   })
 
   it('filtra roles que no son string y tolera pCode/exp ausentes', () => {
-    const token = fakeJwt({ sub: 1, sid: 2, roles: ['admin', 42, null] })
+    const token = fakeJwt({ sub: 'usr-001', sid: 2, roles: ['admin', 42, null] })
     expect(readAccessTokenClaims(token)).toEqual({
-      sub: 1,
+      sub: 'usr-001',
       sid: 2,
       pCode: null,
       exp: null,

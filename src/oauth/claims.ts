@@ -12,8 +12,8 @@
  */
 
 export interface AccessTokenClaims {
-  /** Id del usuario. */
-  sub: number
+  /** `code` del usuario, o `globalCode` del consumer — nunca el id interno. */
+  sub: string
   /** Id de la sesión de proyecto. */
   sid: number
   /** Código del proyecto, derivado del cliente OAuth del lado del servidor. */
@@ -46,7 +46,7 @@ export function readAccessTokenClaims(token: string): AccessTokenClaims | null {
     if (typeof decoded !== 'object' || decoded === null) return null
 
     const claims = decoded as Record<string, unknown>
-    if (typeof claims.sub !== 'number' || typeof claims.sid !== 'number') return null
+    if (typeof claims.sub !== 'string' || typeof claims.sid !== 'number') return null
 
     return {
       sub: claims.sub,
