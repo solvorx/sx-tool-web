@@ -41,6 +41,11 @@ export { SxLoginButton } from './ui/login-button'
 export { SxUserMenu, mountUserMenu } from './ui/user-menu'
 export type { MountUserMenuOptions, UserMenuLabels, UserMenuOptions } from './ui/user-menu'
 
+export { COUNTRIES, DEFAULT_COUNTRY_ISO2, DIAL_CODES_BY_LENGTH } from './ui/phone-countries'
+export type { Country } from './ui/phone-countries'
+export { PHONE_MAX_LENGTH, dialCodeOf, findCountry, joinPhoneNumber, splitPhoneNumber } from './ui/phone-format'
+export type { SplitPhone } from './ui/phone-format'
+
 import { SxLoginButton } from './ui/login-button'
 import { SxUserMenu } from './ui/user-menu'
 
