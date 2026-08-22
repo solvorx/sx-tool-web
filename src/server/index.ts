@@ -39,7 +39,7 @@ export interface SolvorxServerClientOptions {
 
 export interface SolvorxServerClient {
   /** URL de `/authorize`. Redirigir top-level -nunca `fetch`-, igual que en el barril de navegador. */
-  buildAuthorizeUrl(params: { state: string; codeChallenge: string; prompt?: 'login' }): string
+  buildAuthorizeUrl(params: { state: string; codeChallenge: string; prompt?: 'login'; sxorg?: string }): string
   /** Canje del código por tokens, con `client_secret` si el cliente lo tiene configurado. */
   exchangeCode(params: { code: string; codeVerifier: string }): Promise<TokenResponse>
   /** Renovación con `grant_type=refresh_token`. Serializar del lado de quien llama -acá no hay lock. */
@@ -70,6 +70,7 @@ export function createSolvorxServerClient(options: SolvorxServerClientOptions): 
         state: params.state,
         codeChallenge: params.codeChallenge,
         ...(params.prompt ? { prompt: params.prompt } : {}),
+        ...(params.sxorg ? { sxorg: params.sxorg } : {}),
       }),
 
     exchangeCode: (params) =>

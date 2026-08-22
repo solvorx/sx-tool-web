@@ -59,6 +59,8 @@ export function buildAuthorizeUrl(
     codeChallenge: string
     /** `'login'` fuerza reautenticación aunque haya sesión SSO abierta. */
     prompt?: 'login'
+    /** Organization.code a resolver — solo tiene efecto si el cliente OAuth es multiOrganization. */
+    sxorg?: string
   },
 ): string {
   const query = new URLSearchParams({
@@ -70,6 +72,7 @@ export function buildAuthorizeUrl(
     code_challenge: params.codeChallenge,
     code_challenge_method: 'S256',
     ...(params.prompt ? { prompt: params.prompt } : {}),
+    ...(params.sxorg ? { sxorg: params.sxorg } : {}),
   })
 
   return `${issuer}${OAUTH_PATH}/authorize?${query.toString()}`

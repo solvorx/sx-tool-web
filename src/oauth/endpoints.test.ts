@@ -67,6 +67,31 @@ describe('buildAuthorizeUrl', () => {
     expect(new URL(url).searchParams.get('prompt')).toBe('login')
   })
 
+  it('no agrega sxorg si no se pasó', () => {
+    const url = buildAuthorizeUrl(ISSUER, {
+      clientId: 'c',
+      redirectUri: 'http://localhost:3002/callback',
+      scopes: ['openid'],
+      state: 's',
+      codeChallenge: 'ch',
+    })
+
+    expect(new URL(url).searchParams.has('sxorg')).toBe(false)
+  })
+
+  it('agrega sxorg solo cuando se pasó explícitamente', () => {
+    const url = buildAuthorizeUrl(ISSUER, {
+      clientId: 'c',
+      redirectUri: 'http://localhost:3002/callback',
+      scopes: ['openid'],
+      state: 's',
+      codeChallenge: 'ch',
+      sxorg: 'clinica-central',
+    })
+
+    expect(new URL(url).searchParams.get('sxorg')).toBe('clinica-central')
+  })
+
   it('no modifica redirect_uri -regla 6: SXMS la compara byte a byte-', () => {
     const url = buildAuthorizeUrl(ISSUER, {
       clientId: 'c',

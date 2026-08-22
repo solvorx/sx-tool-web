@@ -128,6 +128,17 @@ describe('createSolvorxServerClient', () => {
     )
   })
 
+  it('buildAuthorizeUrl agrega sxorg solo cuando se pasa explícitamente', () => {
+    const client = createSolvorxServerClient(baseOptions)
+
+    client.buildAuthorizeUrl({ state: 's', codeChallenge: 'c', sxorg: 'clinica-central' })
+
+    expect(buildAuthorizeUrlSpy).toHaveBeenCalledWith(
+      'http://localhost:9000',
+      expect.objectContaining({ sxorg: 'clinica-central' }),
+    )
+  })
+
   it('saca la barra final del issuer, igual que createSolvorxClient', () => {
     const client = createSolvorxServerClient({ ...baseOptions, issuer: 'http://localhost:9000/' })
 
