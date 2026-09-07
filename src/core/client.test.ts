@@ -38,7 +38,7 @@ const baseOptions = {
 
 function fakeUser(): UserInfo {
   return {
-    sub: '1',
+    sub: 'usr-001',
     name: 'Ana López',
     preferred_username: 'ana-48213',
     email: 'ana@example.com',
@@ -264,7 +264,14 @@ describe('logout', () => {
     await client.logout()
 
     expect(revokeTokenMock).toHaveBeenCalledWith('http://localhost:9000', 'sx-console-web', 'access-1')
-    expect(ssoLogoutMock).toHaveBeenCalledWith('http://localhost:9000')
+    // Con el access token: es lo que deja al backend resolver la sesión SSO sin
+    // depender de que la cookie viaje ni de saber la organización.
+    expect(ssoLogoutMock).toHaveBeenCalledWith('http://localhost:9000', 'sx-console-web', {
+      accessToken: 'access-1',
+    })
+    // Y en ese orden: revocar el token antes dejaría al logout de SSO sin con
+    // qué identificarse.
+    expect(ssoLogoutMock.mock.invocationCallOrder[0]!).toBeLessThan(revokeTokenMock.mock.invocationCallOrder[0]!)
     expect(client.getStatus()).toBe('unauthenticated')
     expect(client.currentUser()).toBeNull()
     expect(storage.getRefreshToken()).toBeNull()

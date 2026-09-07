@@ -10,7 +10,7 @@ if (!customElements.get('sx-user-menu')) {
 
 function fakeUser(): UserInfo {
   return {
-    sub: '1',
+    sub: 'usr-001',
     name: 'Ana López',
     preferred_username: 'ana-48213',
     email: 'ana@example.com',
@@ -86,19 +86,8 @@ describe('SxUserMenu', () => {
     expect(el.hidden).toBe(true)
   })
 
-  describe('las dos salidas', () => {
-    it('"acá" llama a logout({ scope: "here" })', () => {
-      const el = document.createElement('sx-user-menu') as SxUserMenu
-      document.body.appendChild(el)
-      const client = fakeClient('authenticated', fakeUser())
-      el.client = client
-
-      el.shadowRoot!.querySelector<HTMLButtonElement>('[part="logout-here-button"]')!.click()
-
-      expect(client.logout).toHaveBeenCalledWith({ scope: 'here' })
-    })
-
-    it('"todas las apps" llama a logout({ scope: "everywhere" })', () => {
+  describe('la salida única', () => {
+    it('llama a logout({ scope: "everywhere" })', () => {
       const el = document.createElement('sx-user-menu') as SxUserMenu
       document.body.appendChild(el)
       const client = fakeClient('authenticated', fakeUser())
@@ -109,18 +98,53 @@ describe('SxUserMenu', () => {
       expect(client.logout).toHaveBeenCalledWith({ scope: 'everywhere' })
     })
 
-    it('cada salida muestra su título y su descripción por default', () => {
+    it('muestra su título y su descripción por default', () => {
       const el = document.createElement('sx-user-menu') as SxUserMenu
       document.body.appendChild(el)
       el.client = fakeClient('authenticated', fakeUser())
 
       const root = el.shadowRoot!
-      const here = root.querySelector('[part="logout-here-button"]')!
       const everywhere = root.querySelector('[part="logout-everywhere-button"]')!
 
-      expect(here.querySelector('.sx-item-title')?.textContent).toBe('Cerrar sesión acá')
-      expect(here.querySelector('.sx-item-description')?.textContent).toMatch(/resto de las apps/)
       expect(everywhere.querySelector('.sx-item-title')?.textContent).toBe('Cerrar sesión en todas las apps')
+    })
+  })
+
+  describe('estilo de la salida global', () => {
+    // Aserciones de forma sobre el string de estilos: fijan la ausencia de
+    // regresiones puntuales (botón gris del UA, separador huérfano), no
+    // valores exactos de color.
+    it('la salida global se ve como acción destructiva, no como botón gris del sistema', () => {
+      const el = document.createElement('sx-user-menu') as SxUserMenu
+      document.body.appendChild(el)
+      el.client = fakeClient('authenticated', fakeUser())
+
+      const css = el.shadowRoot!.querySelector('style')!.textContent ?? ''
+      expect(css).toMatch(/button\s*\{[^}]*background:\s*transparent/) // el reset compartido
+      const rule = css.slice(css.indexOf("[part='logout-everywhere-button'] {"))
+      expect(rule).toMatch(/var\(--sx-color-danger\)/)
+      expect(rule).not.toMatch(/border-radius:\s*0\b/)
+      expect(rule).not.toMatch(/border-top:/) // el separador huérfano
+    })
+  })
+
+  describe('z-index del panel', () => {
+    // El panel es `position: absolute` sin stacking context propio -pinta en
+    // el del host page-, así que necesita un z-index explícito o pierde
+    // contra cualquier elemento posicionado de la app que integra (bug real:
+    // ver AGENTS.md / README.md, sección `--sx-z-panel`). Aserción de forma
+    // sobre el string de estilos, mismo criterio que 'estilo de la salida
+    // global' más abajo -fija que la regla exista, no un valor de recorte
+    // exacto de CSS-.
+    it('el panel declara z-index vía --sx-z-panel, con fallback a 100', () => {
+      const el = document.createElement('sx-user-menu') as SxUserMenu
+      document.body.appendChild(el)
+      el.client = fakeClient('authenticated', fakeUser())
+
+      const css = el.shadowRoot!.querySelector('style')!.textContent ?? ''
+      expect(css).toMatch(/--sx-z-panel:\s*100/) // declarada en :host (sharedStyles)
+      const rule = css.slice(css.indexOf("[part='panel'] {"))
+      expect(rule).toMatch(/z-index:\s*var\(--sx-z-panel,\s*100\)/)
     })
   })
 
@@ -130,17 +154,13 @@ describe('SxUserMenu', () => {
       document.body.appendChild(el)
       el.labels = {
         accountLink: 'Ir a mi perfil',
-        signOutHereTitle: 'Salir de acá',
+        signOutEverywhereTitle: 'Salir de todas',
       }
       el.client = fakeClient('authenticated', fakeUser())
 
       const root = el.shadowRoot!
       expect(root.querySelector('[part="account-link"]')?.textContent).toBe('Ir a mi perfil')
-      expect(root.querySelector('[part="logout-here-button"] .sx-item-title')?.textContent).toBe('Salir de acá')
-      // Lo que no se pisa sigue siendo el default.
-      expect(root.querySelector('[part="logout-everywhere-button"] .sx-item-title')?.textContent).toBe(
-        'Cerrar sesión en todas las apps',
-      )
+      expect(root.querySelector('[part="logout-everywhere-button"] .sx-item-title')?.textContent).toBe('Salir de todas')
     })
   })
 
@@ -158,6 +178,51 @@ describe('SxUserMenu', () => {
       expect(el.labels).toEqual({ accountLink: 'Ir a mi perfil' })
       expect(el.accountLinkTarget).toBe('_self')
       expect(el.shadowRoot?.querySelector('[part="account-link"]')?.getAttribute('target')).toBe('_self')
+    })
+  })
+
+  describe('tema', () => {
+    it('sin la opción theme no se renderiza la sección de tema', () => {
+      const el = document.createElement('sx-user-menu') as SxUserMenu
+      document.body.appendChild(el)
+      el.client = fakeClient('authenticated', fakeUser())
+
+      expect(el.shadowRoot!.querySelector('[part="theme"]')).toBeNull()
+    })
+
+    it('con theme hay 3 radios y el aria-checked marca el valor inicial', () => {
+      const el = document.createElement('sx-user-menu') as SxUserMenu
+      document.body.appendChild(el)
+      el.theme = { value: 'dark', onChange: vi.fn() }
+      el.client = fakeClient('authenticated', fakeUser())
+
+      const root = el.shadowRoot!
+      expect(root.querySelector('[part="theme"]')?.getAttribute('role')).toBe('radiogroup')
+      const options = root.querySelectorAll('[part="theme-option"]')
+      expect(options).toHaveLength(3)
+      expect(options[0]?.getAttribute('aria-checked')).toBe('false') // light
+      expect(options[1]?.getAttribute('aria-checked')).toBe('true') // dark
+      expect(options[2]?.getAttribute('aria-checked')).toBe('false') // system
+    })
+
+    it('el click llama a onChange, mueve el aria-checked y no cierra el panel', () => {
+      const el = document.createElement('sx-user-menu') as SxUserMenu
+      document.body.appendChild(el)
+      const onChange = vi.fn()
+      el.theme = { value: 'light', onChange }
+      el.client = fakeClient('authenticated', fakeUser())
+
+      const root = el.shadowRoot!
+      const details = root.querySelector('details')!
+      details.open = true
+
+      const options = root.querySelectorAll<HTMLButtonElement>('[part="theme-option"]')
+      options[2]!.click() // system
+
+      expect(onChange).toHaveBeenCalledWith('system')
+      expect(options[0]?.getAttribute('aria-checked')).toBe('false')
+      expect(options[2]?.getAttribute('aria-checked')).toBe('true')
+      expect(details.open).toBe(true)
     })
   })
 
@@ -232,6 +297,7 @@ describe('createSolvorxBffClient', () => {
     const client = createSolvorxBffClient({
       user: fakeUser(),
       accountUrl: '/profile',
+      clientId: 'sx-account-web',
       logoutUrl: '/api/auth/logout',
       issuer: 'http://localhost:9000',
     })
@@ -246,6 +312,7 @@ describe('createSolvorxBffClient', () => {
     const client = createSolvorxBffClient({
       user: null,
       accountUrl: '/profile',
+      clientId: 'sx-account-web',
       logoutUrl: '/api/auth/logout',
       issuer: 'http://localhost:9000',
     })
@@ -254,10 +321,11 @@ describe('createSolvorxBffClient', () => {
     expect(client.currentUser()).toBeNull()
   })
 
-  it('logout({ scope: "here" }) solo pega contra logoutUrl, no contra el SSO', async () => {
+  it('logout({ scope: "here" }) pega una sola vez contra logoutUrl, con el scope en el cuerpo', async () => {
     const client = createSolvorxBffClient({
       user: fakeUser(),
       accountUrl: '/profile',
+      clientId: 'sx-account-web',
       logoutUrl: '/api/auth/logout',
       issuer: 'http://localhost:9000',
     })
@@ -265,32 +333,48 @@ describe('createSolvorxBffClient', () => {
     await client.logout({ scope: 'here' })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', { method: 'POST' })
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'here' }),
+    })
     expect(client.getStatus()).toBe('unauthenticated')
   })
 
-  it('logout({ scope: "everywhere" }) además pega contra el logout de SSO del issuer', async () => {
+  /**
+   * El contrato que reemplazó al `ssoLogout` desde el navegador: ese `fetch`
+   * era cross-site contra el Authorization Server y la cookie `sx_sso`
+   * (`SameSite=Lax`) no viajaba, así que el logout quedaba en nada. Ahora el
+   * alcance viaja al BFF y lo cierra él, server-to-server.
+   */
+  it('logout({ scope: "everywhere" }) NO pega contra el issuer: manda el scope al BFF y nada más', async () => {
     const client = createSolvorxBffClient({
       user: fakeUser(),
       accountUrl: '/profile',
+      clientId: 'sx-account-web',
       logoutUrl: '/api/auth/logout',
       issuer: 'http://localhost:9000',
     })
 
     await client.logout({ scope: 'everywhere' })
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', { method: 'POST' })
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:9000/v1/public/oauth/logout', {
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith('/api/auth/logout', {
       method: 'POST',
-      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'everywhere' }),
     })
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      'http://localhost:9000/v1/public/oauth/logout',
+      expect.anything(),
+    )
   })
 
   it('sirve para <sx-user-menu> igual que un SolvorxClient completo', () => {
     const client: SolvorxSessionSource = createSolvorxBffClient({
       user: fakeUser(),
       accountUrl: '/profile',
+      clientId: 'sx-account-web',
       logoutUrl: '/api/auth/logout',
       issuer: 'http://localhost:9000',
     })

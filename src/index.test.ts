@@ -22,6 +22,10 @@ describe('index · contrato de la superficie pública', () => {
   it('exporta exactamente los valores esperados, ni uno más ni uno menos', () => {
     const expected = [
       'CLIENT_ERROR_CODE',
+      'COUNTRIES',
+      'DEFAULT_COUNTRY_ISO2',
+      'DIAL_CODES_BY_LENGTH',
+      'PHONE_MAX_LENGTH',
       'SolvorxError',
       'SxLoginButton',
       'SxUserMenu',
@@ -30,15 +34,19 @@ describe('index · contrato de la superficie pública', () => {
       'createSessionStorageTokenStorage',
       'createSolvorxBffClient',
       'createSolvorxClient',
+      'dialCodeOf',
+      'findCountry',
       'getDefaultClient',
       'isForbidden',
       'isRateLimited',
       'isSessionMissing',
       'isUnauthorized',
+      'joinPhoneNumber',
       'mountUserMenu',
       'readAccessTokenClaims',
       'registerSolvorxElements',
       'setDefaultClient',
+      'splitPhoneNumber',
     ].sort()
 
     expect(Object.keys(pkg).sort()).toEqual(expected)

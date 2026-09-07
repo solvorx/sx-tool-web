@@ -1,11 +1,13 @@
 import { resolveOptions, type SolvorxClientOptions } from '../config/options'
 import { CLIENT_ERROR_CODE, SolvorxError, isSessionMissing, isUnauthorized } from '../http/error'
-import { buildAuthorizeUrl, exchangeCode, revokeToken, ssoLogout, userinfo, type UserInfo } from '../oauth/endpoints'
+import { buildAuthorizeUrl, exchangeCode, revokeToken, ssoLogout, userinfo } from '../oauth/endpoints'
 import { createCodeVerifier, createState, deriveCodeChallenge } from '../oauth/pkce'
 import { consumeTransaction, sanitizeReturnTo, saveTransaction } from '../oauth/transaction'
 import { createRefreshCoordinator } from '../session/refresh'
 import { createBroadcastSessionWatcher } from '../session/sync'
-import { createStore, type AuthStatus, type StateListener } from './state'
+import { createStore, type AuthStatus, type SessionUser, type StateListener } from './state'
+
+export type { SessionUser } from './state'
 
 export interface LoginOptions {
   /** Path relativo a donde volver tras el login. Default: la URL actual. */
@@ -38,7 +40,7 @@ export interface SolvorxSessionSource {
   /** `'loading'` antes de que `init()` resuelva. */
   getStatus(): AuthStatus
   /** El usuario autenticado, o `null`. Sincrónico. */
-  currentUser(): UserInfo | null
+  currentUser(): SessionUser | null
   subscribe(listener: StateListener): () => void
   logout(options?: LogoutOptions): Promise<void>
 }
@@ -216,16 +218,19 @@ export function createSolvorxClient(options: SolvorxClientOptions): SolvorxClien
     const scope = logoutOptions.scope ?? 'everywhere'
     const current = refresh.getCurrent()
 
-    // Bearer: siempre funciona, sin importar el dominio de esta app.
-    if (current) {
-      await revokeToken(config.issuer, config.clientId, current.accessToken).catch(() => null)
+    // El SSO primero y el /revoke después, no al revés: el logout SSO se
+    // identifica con este mismo access token, y revocarlo antes lo dejaba sin
+    // con qué probar de quién es la sesión que pide cerrar.
+    // `scope: 'here'` lo omite: es lo que deja la sesión SSO viva a propósito.
+    if (scope === 'everywhere') {
+      await ssoLogout(config.issuer, config.clientId, { accessToken: current?.accessToken }).catch(() => null)
     }
 
-    // Cookie de sesión SSO: solo funciona si viaja -mismo site que auth.solvorx.com-.
-    // Ver la limitación documentada en el README. Best-effort a propósito.
-    // `scope: 'here'` la omite: es lo que deja la sesión SSO viva a propósito.
-    if (scope === 'everywhere') {
-      await ssoLogout(config.issuer).catch(() => null)
+    // Bearer: siempre funciona, sin importar el dominio de esta app. Con
+    // `'everywhere'` la cascada del SSO ya cerró esta sesión y esto es
+    // idempotente; con `'here'` es lo único que la cierra.
+    if (current) {
+      await revokeToken(config.issuer, config.clientId, current.accessToken).catch(() => null)
     }
 
     refresh.clear()
@@ -267,18 +272,32 @@ export function setDefaultClient(client: SolvorxClient | null): void {
 
 export interface SolvorxBffClientOptions {
   /** Hidratado por el Server Component que ya llamó a `requireSession()`; `null` si no hay sesión. */
-  user: UserInfo | null
+  user: SessionUser | null
   /** Destino del botón "Mi cuenta" de `<sx-user-menu>`. */
   accountUrl: string
   /**
-   * Endpoint propio de la app que cierra la sesión del BFF -revoca el
-   * refresh token del lado del servidor y borra la cookie de sesión. P. ej.
-   * `/api/auth/logout`. Este cliente nunca ve el refresh token: vive en el
-   * store del servidor (Redis, o lo que use la app), no acá.
+   * `client_id` OAuth de esta app. No es secreto -viaja en la URL de
+   * `/authorize`-, así que pasarlo desde un Client Component es seguro.
+   *
+   * Ya no lo usa este cliente: el logout de SSO pasa por `logoutUrl`. Se
+   * mantiene aceptado para no romper a quien ya lo pasa.
+   */
+  clientId?: string
+  /**
+   * Endpoint propio de la app que cierra la sesión -revoca el refresh token
+   * del lado del servidor, borra la cookie de sesión y, con `scope:
+   * 'everywhere'`, cierra también la sesión SSO. P. ej. `/api/auth/logout`.
+   * Este cliente nunca ve el refresh token: vive en el store del servidor
+   * (Redis, o lo que use la app), no acá.
+   *
+   * Recibe `POST` con `{ scope }` en JSON.
    */
   logoutUrl: string
-  /** Base del Authorization Server, para el logout de SSO. Igual que `issuer` en `createSolvorxClient`. */
-  issuer: string
+  /**
+   * Base del Authorization Server. Ya no lo usa este cliente -el logout de SSO
+   * lo hace el BFF, ver `logout`-; se mantiene aceptado por compatibilidad.
+   */
+  issuer?: string
 }
 
 /**
@@ -294,7 +313,6 @@ export interface SolvorxBffClientOptions {
  * quien integra asigna el cliente explícitamente por la propiedad `.client`.
  */
 export function createSolvorxBffClient(options: SolvorxBffClientOptions): SolvorxSessionSource {
-  const issuer = options.issuer.replace(/\/+$/, '')
   const store = createStore({
     status: options.user ? 'authenticated' : 'unauthenticated',
     user: options.user,
@@ -303,14 +321,18 @@ export function createSolvorxBffClient(options: SolvorxBffClientOptions): Solvor
   async function logout(logoutOptions: LogoutOptions = {}): Promise<void> {
     const scope = logoutOptions.scope ?? 'everywhere'
 
-    // Le pega a la propia app -ahí vive el refresh token, este cliente nunca lo ve.
-    await fetch(options.logoutUrl, { method: 'POST' }).catch(() => null)
-
-    // Cookie de sesión SSO: mismo best-effort y misma limitación cross-site
-    // que `createSolvorxClient().logout()`. Ver el README.
-    if (scope === 'everywhere') {
-      await ssoLogout(issuer).catch(() => null)
-    }
+    // Todo el logout pasa por la propia app: ahí vive el access token, y con él
+    // el BFF cierra la sesión SSO server-to-server.
+    //
+    // Este cliente ya NO llama a `ssoLogout` por su cuenta. Lo hacía, y desde
+    // el navegador esa llamada es cross-site contra el Authorization Server:
+    // la cookie `sx_sso` es `SameSite=Lax` y no viaja, así que el logout
+    // quedaba en nada. Ver `ssoLogout`.
+    await fetch(options.logoutUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope }),
+    }).catch(() => null)
 
     store.setState({ status: 'unauthenticated', user: null })
   }

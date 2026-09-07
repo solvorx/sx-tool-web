@@ -75,6 +75,13 @@ describe('errorFromResponse · OAuth (RFC 6749 §5.2)', () => {
     expect(error.code).toBe('unauthorized_client')
     expect(error.message).toContain('no está habilitada')
   })
+
+  it('tiene mensaje propio para invalid_token -antes caía en el genérico', async () => {
+    const error = await errorFromResponse(jsonResponse(401, { error: 'invalid_token' }))
+
+    expect(error.code).toBe('invalid_token')
+    expect(error.message).not.toBe('Ocurrió un error inesperado.')
+  })
 })
 
 describe('errorFromResponse · x-response-trace', () => {

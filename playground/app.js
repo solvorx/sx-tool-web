@@ -77,6 +77,42 @@ const sx = createSolvorxClient(config)
 
 registerSolvorxElements()
 
+// ─── tema ────────────────────────────────────────────────────────────────────
+// Demuestra la sección de tema de <sx-user-menu> (ver src/ui/user-menu.ts).
+// El playground no tiene una paleta oscura propia -a diferencia de
+// sx-console-web / sx-account-web-, así que "aplicar" acá es nomás pisar
+// `color-scheme` en <html>: alcanza para que el toggle sea visible y real,
+// sin duplicar la infraestructura de tema (cookie + script inline sin flash)
+// que sí vive en esas apps.
+const THEME_KEY = 'sx-playground-theme'
+
+function loadTheme() {
+  const stored = localStorage.getItem(THEME_KEY)
+  return stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system'
+}
+
+function applyTheme(theme) {
+  document.documentElement.style.colorScheme = theme === 'system' ? 'light dark' : theme
+}
+
+let currentTheme = loadTheme()
+applyTheme(currentTheme)
+
+// `.theme` se setea DESPUÉS de registerSolvorxElements(): el elemento ya
+// estaba en el HTML, así que definir el Custom Element lo upgradea ahí mismo
+// -mismo motivo que createSolvorxClient() va antes, ver el comentario de
+// arriba- y recién ahí el setter de la clase real (no un shadow de instancia)
+// dispara #bind().
+document.querySelector('sx-user-menu').theme = {
+  value: currentTheme,
+  onChange(theme) {
+    currentTheme = theme
+    localStorage.setItem(THEME_KEY, theme)
+    applyTheme(theme)
+    log(`tema: ${theme}`)
+  },
+}
+
 const statusBadge = document.getElementById('status-badge')
 const userJson = document.getElementById('user-json')
 const refreshPresence = document.getElementById('refresh-token-presence')

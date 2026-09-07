@@ -12,7 +12,7 @@ export type {
   SolvorxClient,
   SolvorxSessionSource,
 } from './core/client'
-export type { AuthStatus, StateListener } from './core/state'
+export type { AuthStatus, SessionUser, StateListener } from './core/state'
 
 export type { ResolvedOptions, SolvorxClientOptions, StorageMode } from './config/options'
 
@@ -39,7 +39,14 @@ export type { AccessTokenClaims } from './oauth/claims'
 
 export { SxLoginButton } from './ui/login-button'
 export { SxUserMenu, mountUserMenu } from './ui/user-menu'
-export type { MountUserMenuOptions, UserMenuLabels, UserMenuOptions } from './ui/user-menu'
+export type {
+  MountUserMenuOptions,
+  SxTheme,
+  UserMenuLabels,
+  UserMenuOptions,
+  UserMenuThemeLabels,
+  UserMenuThemeOptions,
+} from './ui/user-menu'
 
 export { COUNTRIES, DEFAULT_COUNTRY_ISO2, DIAL_CODES_BY_LENGTH } from './ui/phone-countries'
 export type { Country } from './ui/phone-countries'

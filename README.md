@@ -79,7 +79,7 @@ fetch('/api/lo-que-sea', { headers: { Authorization: `Bearer ${token}` } })
 ```ts
 await sx.init()              // único punto de entrada async: resuelve callback, rehidrata, o queda unauthenticated
 sx.login({ returnTo, prompt }) // redirect top-level a /authorize. prompt: 'login' fuerza reautenticación
-sx.currentUser()             // UserInfo | null, sincrónico
+sx.currentUser()             // SessionUser | null, sincrónico
 sx.getStatus()                // 'loading' | 'authenticated' | 'unauthenticated'
 await sx.getAccessToken()    // token vigente; renueva bajo lock si hace falta
 await sx.logout()
@@ -146,7 +146,7 @@ vez de pelear con el barril de navegador:
 import { createSolvorxServerClient } from '@solvorx/sx-tool-web/server'
 
 const sx = createSolvorxServerClient({
-  issuer: process.env.AMS_BASE_URL!,
+  issuer: process.env.SXMS_BASE_URL!,
   clientId: process.env.OAUTH_CLIENT_ID!,
   clientSecret: process.env.OAUTH_CLIENT_SECRET!, // omitilo si tu backend es un cliente público
   redirectUri: process.env.OAUTH_REDIRECT_URI!,
@@ -169,7 +169,18 @@ ejemplo real: Redis para la sesión, un lock distribuido para el refresh, cookie
 El subpath también reexporta lo que no depende de DOM y sirve tanto del lado del servidor como del
 navegador: `createCodeVerifier`/`createState`/`deriveCodeChallenge` (PKCE), `sanitizeReturnTo`,
 `readAccessTokenClaims`, `SolvorxError` + los predicados (`isForbidden`, `isRateLimited`,
-`isSessionMissing`, `isUnauthorized`), y los tipos `TokenResponse`/`UserInfo`/`AccessTokenClaims`.
+`isSessionMissing`, `isUnauthorized`), y los tipos `TokenResponse`/`UserInfo`/`AccessTokenClaims`/`SessionUser`.
+
+### El tipo `SessionUser`
+
+`sx.currentUser()`, el segundo argumento de `sx.subscribe()` y el `user` de `createSolvorxBffClient`
+tipan como `SessionUser | null`, no `UserInfo | null`. `SessionUser` (`src/core/state.ts`) es un
+subconjunto estructural de `UserInfo` (`sub`, `name`, `preferred_username`, `email`, `picture?`): es
+lo único que `<sx-user-menu>` de verdad lee. Como cualquier `UserInfo` satisface `SessionUser` sin
+cambios, un BFF que ya resuelve la sesión con `readAccessTokenClaims()` no necesita inventar un
+`project` falso ni pagar un `userinfo()` extra por render solo para tipar `user` -y por la misma
+razón, anotar estos valores como `UserInfo | null` en vez de `SessionUser | null` compila igual sin
+avisar del error.
 
 ### `<sx-user-menu>` sin tokens en el navegador
 
@@ -182,19 +193,19 @@ Server Component, sin manejar ningún token:
 import { createSolvorxBffClient, registerSolvorxElements } from '@solvorx/sx-tool-web'
 
 const sx = createSolvorxBffClient({
-  user, // UserInfo | null, hidratado por tu Server Component -ya pasó por requireSession() o el equivalente
+  user, // SessionUser | null, hidratado por tu Server Component -ya pasó por requireSession() o el equivalente
   accountUrl: '/profile',
-  logoutUrl: '/api/auth/logout', // tu propio endpoint: revoca el refresh token y borra tu cookie/sesión
-  issuer: process.env.NEXT_PUBLIC_AMS_BASE_URL!, // para el logout de SSO, best-effort igual que en el cliente público
+  logoutUrl: '/api/auth/logout', // tu endpoint: recibe { scope }, revoca los tokens y borra tu cookie/sesión
 })
 
 registerSolvorxElements()
 document.querySelector('sx-user-menu').client = sx
 ```
 
-`logout()` -y las dos salidas del menú, "acá" vs "en todas las apps"- le pegan a `logoutUrl` (tu
-propia app) y, si corresponde, al logout de SSO del `issuer`; nunca ven un refresh token, porque
-nunca lo tuvieron.
+`logout()` -y el botón de cerrar sesión del menú, que siempre es global- le pega **solo** a
+`logoutUrl`, con `{ scope }` en el cuerpo; nunca ve un refresh token, porque nunca lo tuvo. El cierre
+de la sesión SSO lo hace tu BFF con el access token que tiene guardado: ver
+[El logout ya no depende de la cookie](#el-logout-ya-no-depende-de-la-cookie).
 
 ---
 
@@ -231,6 +242,36 @@ sx-user-menu::part(trigger) {
 }
 ```
 
+**Si tu marca es clara, seteá también `--sx-color-primary-ink`.** El color de marca cumple dos
+roles con luminosidades opuestas: `--sx-color-primary` es **relleno** (fondo del login-button) y
+`--sx-color-primary-ink` es **tinta** (iniciales del avatar, anillos de foco). Por defecto la tinta
+hereda el relleno, que es lo correcto para una marca oscura; con una clara hay que separarlas o las
+iniciales del avatar quedan ilegibles:
+
+```css
+sx-user-menu {
+  --sx-color-primary: #07b1ae;      /* relleno: el teal de marca */
+  --sx-color-primary-ink: #046b69;  /* tinta: el mismo teal, legible sobre claro */
+}
+```
+
+`--sx-z-panel` (default `100`) controla el `z-index` del panel desplegable de `<sx-user-menu>`
+(`part='panel'`). El shadow root no crea su propio stacking context, así que el panel compite en
+el del *host* page -si la app que integra tiene un modal, dropdown u otro elemento posicionado
+con un `z-index` mayor a 100, hay que subir esta variable:
+
+```css
+sx-user-menu {
+  --sx-z-panel: 250;
+}
+```
+
+**Atención**: si algún ancestro del componente en la app que integra tiene `transform`, `filter`
+u `opacity` (distinto de `1`), ese ancestro crea su *propio* stacking context y atrapa al panel
+adentro -ninguna variable CSS puede hacer que el panel "escape" de ese contexto y pinte por
+encima de contenido fuera de él-. En ese caso, la solución está del lado del host: sacar la
+propiedad que crea el stacking context, o mover el ancestro fuera del árbol que compite.
+
 ### Por framework
 
 - **React 19** pasa props y listeners a Custom Elements sin ceremonia adicional; `client={sx}` y
@@ -251,22 +292,27 @@ tags.
 
 ---
 
-## Limitación conocida: el logout cross-site
+## El logout ya no depende de la cookie
 
-`logout()` hace dos llamadas:
+`logout()` hace dos llamadas, y el orden importa:
 
-1. `POST /v1/public/oauth/revoke` con el access token -Bearer, siempre funciona, sin importar el
-   dominio de tu app- cierra la sesión de proyecto de esta app.
-2. `POST /v1/public/oauth/logout` con `credentials: 'include'` revoca la `SsoSession` del navegador y
-   cascadea a **todas** las sesiones de proyecto que nacieron de ese login -el "un solo logout cierra
-   todas las apps".
+1. `POST /v1/public/oauth/logout` con el access token en `Authorization: Bearer` revoca la
+   `SsoSession` del navegador y cascadea a **todas** las sesiones de proyecto que nacieron de ese
+   login -el "un solo logout cierra todas las apps".
+2. `POST /v1/public/oauth/revoke` con el mismo access token cierra la sesión de proyecto de esta app.
+   Con `scope: 'everywhere'` la cascada del paso 1 ya la cerró y esto es idempotente; con
+   `scope: 'here'` es lo único que la cierra. Va segundo porque revocar antes dejaría al paso 1 sin
+   con qué identificarse.
 
-El paso 2 **hoy solo funciona para apps bajo `*.solvorx.com`**: la cookie de sesión SSO es
-`SameSite=Lax`, y un `fetch` cross-site no la manda. Para una app en un dominio propio, ese POST
-llega sin cookie y no revoca nada -tu `logout()` sigue cerrando la sesión de tu app (paso 1), pero no
-las de otras apps de SolvorX que la persona tenga abiertas. El arreglo (un `GET` con
-`post_logout_redirect_uri`, que sí viaja con la cookie en una navegación top-level) es trabajo de
-backend, fuera del alcance de este paquete.
+**Esto reemplaza al `fetch` con `credentials: 'include'` que hacía el paso 1.** Aquella versión
+dependía de que la cookie `sx_sso` viajara, y es `SameSite=Lax`: un `fetch` cross-site no la manda.
+Solo funcionaba para apps que compartieran *site* con el Authorization Server, y fallaba en silencio
+en el resto -la persona "cerraba sesión" y al volver `/authorize` la reautenticaba sin pedirle nada.
+El access token resuelve eso: la sesión sale de él, no de la cookie.
+
+`createSolvorxBffClient()` **no llama a este endpoint**: postea `{ scope }` a tu `logoutUrl` y tu BFF
+hace el paso 1 server-to-server con el access token que ya tiene guardado. En el navegador de una app
+con BFF no hay access token, así que es el único lugar donde puede hacerse bien.
 
 ## Limitación conocida: sincronización entre pestañas
 
@@ -334,9 +380,8 @@ manualmente (la config de `issuer`/`clientId`/`redirectUri` es editable desde la
    una. Ver el comentario de [refresh.ts](src/session/refresh.ts).
 6. `logout()` → sin sesiones activas; recargar manda al login.
 
-**Nota sobre la limitación cross-site del paso 2 de `logout()`:** en este entorno local **no se va a
-reproducir**, y eso no la desmiente. `SameSite` se evalúa por *site*, y el puerto no es parte del
-site -`localhost:3002` (el playground) y `localhost:9000` (SXMS) son same-site entre sí, así que la
-cookie `sx_sso` viaja igual que viajaría en producción entre subdominios de `*.solvorx.com`-. Para
-reproducir la limitación de verdad haría falta un dominio distinto de `localhost`, cosa que este
-entorno no tiene.
+**Nota sobre el logout en este entorno local:** el playground (`localhost:3002`) y SXMS
+(`localhost:9000`) son same-site entre sí -`SameSite` se evalúa por *site* y el puerto no cuenta-,
+así que acá la vieja vía de la cookie funcionaba y la de ahora también. Es justamente por eso que
+este entorno **nunca mostró** el bug que motivó el cambio: hacía falta un host que no compartiera
+site con SXMS, como `<org>.account.localhost:3001` contra `localhost:9000`.

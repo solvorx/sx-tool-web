@@ -147,6 +147,38 @@
       .badge.unauthenticated {
         background: color-mix(in srgb, gray 30%, transparent);
       }
+
+      /*
+       * Card de regresión para el bug del z-index del panel de <sx-user-menu>
+       * (ver `src/ui/user-menu.ts`, part='panel', y `--sx-z-panel` en
+       * `src/ui/styles.ts`). Antes de ese fix, el panel pintaba en
+       * `z-index: auto` -sin stacking context propio- y perdía contra
+       * *cualquier* elemento posicionado con z-index explícito que apareciera
+       * cerca en la página, exactamente como este card. Es la razón por la
+       * que el bug nunca se detectó acá: el playground, antes de este card,
+       * no tenía ningún otro stacking context con el que el panel pudiera
+       * competir.
+       *
+       * `position: relative` + `top: -3rem` lo desplaza hacia arriba desde su
+       * posición natural -inmediatamente debajo de la sección "Componentes"-
+       * para que su mitad superior quede justo sobre la fila del trigger
+       * (`.actions`) y su mitad inferior sobre la zona donde abre el panel
+       * (`top: calc(100% + 0.375rem)` relativo al trigger). El offset es
+       * aproximado a propósito -alcanza con que se solape parcialmente para
+       * que la regresión sea visible al abrir el menú-; si en tu pantalla no
+       * se solapa lo suficiente, ajustá `top`.
+       */
+      .regression-card {
+        position: relative;
+        top: -3rem;
+        z-index: 50;
+        padding: 0.75rem 1rem;
+        border-radius: var(--sx-radius);
+        border: 1px solid color-mix(in srgb, orange 55%, transparent);
+        background: color-mix(in srgb, orange 22%, canvas);
+        font-size: 0.8rem;
+        pointer-events: none;
+      }
     </style>
   </head>
   <body>
@@ -186,6 +218,16 @@
         <sx-user-menu></sx-user-menu>
       </div>
     </section>
+
+    <!-- Ver el comentario junto a `.regression-card` en <head>: demuestra a
+         propósito el bug de z-index del panel de <sx-user-menu> sin depender
+         de ninguna app consumidora. -->
+    <div class="regression-card">
+      Card de regresión -simula un elemento posicionado de una app que integra, como
+      <code>text-field.tsx</code> o un dropdown con <code>z-50</code>-. Si al abrir el menú de
+      usuario (arriba) el panel pinta <em>detrás</em> de este card, el fix de
+      <code>--sx-z-panel</code> se rompió.
+    </div>
 
     <section class="grid">
       <div>

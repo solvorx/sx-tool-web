@@ -100,7 +100,7 @@ describe('createSolvorxServerClient', () => {
 
   it('userinfo no necesita clientSecret -es un GET con Bearer, no autentica al cliente', async () => {
     userinfoMock.mockResolvedValue({
-      sub: '1',
+      sub: 'usr-001',
       name: 'Ana López',
       preferred_username: 'ana-48213',
       email: 'ana@example.com',
@@ -125,17 +125,6 @@ describe('createSolvorxServerClient', () => {
     expect(buildAuthorizeUrlSpy).toHaveBeenCalledWith(
       'http://localhost:9000',
       expect.objectContaining({ prompt: 'login' }),
-    )
-  })
-
-  it('buildAuthorizeUrl agrega sxorg solo cuando se pasa explícitamente', () => {
-    const client = createSolvorxServerClient(baseOptions)
-
-    client.buildAuthorizeUrl({ state: 's', codeChallenge: 'c', sxorg: 'clinica-central' })
-
-    expect(buildAuthorizeUrlSpy).toHaveBeenCalledWith(
-      'http://localhost:9000',
-      expect.objectContaining({ sxorg: 'clinica-central' }),
     )
   })
 

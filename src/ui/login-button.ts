@@ -31,7 +31,7 @@ const BUTTON_STYLES = `
   }
 
   button:focus-visible {
-    outline: 2px solid var(--sx-color-primary);
+    outline: 2px solid var(--sx-color-primary-ink);
     outline-offset: 2px;
   }
 `

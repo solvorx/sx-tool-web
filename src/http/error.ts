@@ -173,6 +173,8 @@ function oauthFallbackMessage(code: string): string {
       return 'Acceso denegado.'
     case 'invalid_grant':
       return 'El código de autorización ya se usó o venció.'
+    case 'invalid_token':
+      return 'La sesión venció o fue cerrada desde otra aplicación.'
     default:
       return 'Ocurrió un error inesperado.'
   }

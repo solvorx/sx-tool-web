@@ -1,6 +1,5 @@
 import { getDefaultClient, type SolvorxSessionSource } from '../core/client'
-import type { AuthStatus } from '../core/state'
-import type { UserInfo } from '../oauth/endpoints'
+import type { AuthStatus, SessionUser } from '../core/state'
 import { createAvatarElement } from './avatar'
 import { sharedStyles } from './styles'
 
@@ -22,6 +21,7 @@ const MENU_STYLES = `
     padding: 0.25em 0.5em 0.25em 0.25em;
     border-radius: var(--sx-radius);
     list-style: none;
+    cursor: pointer;
   }
 
   summary::-webkit-details-marker {
@@ -33,7 +33,7 @@ const MENU_STYLES = `
   }
 
   summary:focus-visible {
-    outline: 2px solid var(--sx-color-primary);
+    outline: 2px solid var(--sx-color-primary-ink);
     outline-offset: 2px;
   }
 
@@ -57,6 +57,13 @@ const MENU_STYLES = `
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    /* El shadow root no crea su propio stacking context: este panel compite
+       en el del *host* page, no en uno propio. Sin z-index explícito pinta
+       en 'auto' y pierde contra cualquier elemento posicionado que aparezca
+       después en el DOM de la app que integra (p.ej. un modal, otro
+       dropdown). --sx-z-panel vive en styles.ts -ver el comentario ahí
+       sobre por qué es una custom property y no un valor fijo acá-. */
+    z-index: var(--sx-z-panel, 100);
   }
 
   [part='profile-name'] {
@@ -86,7 +93,6 @@ const MENU_STYLES = `
     background: color-mix(in srgb, var(--sx-color-fg) 6%, transparent);
   }
 
-  [part='logout-here-button'],
   [part='logout-everywhere-button'] {
     display: flex;
     flex-direction: column;
@@ -94,16 +100,29 @@ const MENU_STYLES = `
     gap: 0.125rem;
     width: 100%;
     padding: 0.5em;
-    border: none;
-    border-top: 1px solid var(--sx-color-border);
-    border-radius: 0;
     text-align: left;
-    margin-top: 0.25rem;
+    border: 1px solid color-mix(in srgb, var(--sx-color-danger) 40%, transparent);
+    border-radius: calc(var(--sx-radius) - 2px);
+    color: var(--sx-color-danger);
+    margin-top: 0.5rem;
   }
 
-  [part='logout-here-button']:hover,
   [part='logout-everywhere-button']:hover {
-    background: color-mix(in srgb, var(--sx-color-fg) 6%, transparent);
+    background: color-mix(in srgb, var(--sx-color-danger) 8%, transparent);
+    border-color: color-mix(in srgb, var(--sx-color-danger) 70%, transparent);
+  }
+
+  /* La descripción gris suelta lee como si no fuera parte del mismo control. */
+  [part='logout-everywhere-button'] .sx-item-description {
+    color: color-mix(in srgb, var(--sx-color-danger) 70%, var(--sx-color-fg-muted));
+  }
+
+  /* renderUserMenu() mueve el foco al panel al abrir (:265-269) pero ningún ítem
+     del panel tenía :focus-visible - solo summary (:34-37). */
+  [part='account-link']:focus-visible,
+  [part='logout-everywhere-button']:focus-visible {
+    outline: 2px solid var(--sx-color-primary-ink);
+    outline-offset: 2px;
   }
 
   .sx-item-title {
@@ -115,6 +134,41 @@ const MENU_STYLES = `
     color: var(--sx-color-fg-muted);
     font-size: 0.8em;
   }
+
+  [part='theme'] {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem;
+    margin-top: 0.25rem;
+    border-radius: calc(var(--sx-radius) - 2px);
+  }
+
+  [part='theme-option'] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border: none;
+    border-radius: calc(var(--sx-radius) - 4px);
+    color: var(--sx-color-fg-muted);
+  }
+
+  [part='theme-option']:hover {
+    background: color-mix(in srgb, var(--sx-color-fg) 6%, transparent);
+    color: var(--sx-color-fg);
+  }
+
+  [part='theme-option'][aria-checked='true'] {
+    background: color-mix(in srgb, var(--sx-color-fg) 8%, transparent);
+    color: var(--sx-color-fg);
+  }
+
+  [part='theme-option']:focus-visible {
+    outline: 2px solid var(--sx-color-primary-ink);
+    outline-offset: 2px;
+  }
 `
 
 /**
@@ -125,18 +179,39 @@ const MENU_STYLES = `
  */
 export interface UserMenuLabels {
   accountLink: string
-  signOutHereTitle: string
-  signOutHereDescription: string
   signOutEverywhereTitle: string
   signOutEverywhereDescription: string
 }
 
 const DEFAULT_LABELS: UserMenuLabels = {
   accountLink: 'Mi cuenta',
-  signOutHereTitle: 'Cerrar sesión acá',
-  signOutHereDescription: 'Salís de esta app. Seguís con la sesión iniciada en el resto de las apps de SolvorX.',
   signOutEverywhereTitle: 'Cerrar sesión en todas las apps',
   signOutEverywhereDescription: 'Salís también de las demás apps de SolvorX.',
+}
+
+export type SxTheme = 'light' | 'dark' | 'system'
+
+export interface UserMenuThemeLabels {
+  label: string
+  light: string
+  dark: string
+  system: string
+}
+
+const DEFAULT_THEME_LABELS: UserMenuThemeLabels = {
+  label: 'Tema',
+  light: 'Claro',
+  dark: 'Oscuro',
+  system: 'Sistema',
+}
+
+export interface UserMenuThemeOptions {
+  /** Preferencia de tema al montar. Cambios posteriores los maneja el menú solo -ver `renderUserMenu`-. */
+  value: SxTheme
+  /** La app persiste (p.ej. la cookie `sx_theme`) y aplica el tema nuevo. */
+  onChange: (theme: SxTheme) => void
+  /** Pisa cualquier subconjunto de `DEFAULT_THEME_LABELS`. */
+  labels?: Partial<UserMenuThemeLabels>
 }
 
 export interface UserMenuOptions {
@@ -148,6 +223,56 @@ export interface UserMenuOptions {
    * *es* la cuenta -por ejemplo, un link a la propia sección de perfil.
    */
   accountLinkTarget?: '_self' | '_blank'
+  /**
+   * Sin esta opción no se renderiza la sección de tema -el paquete sigue
+   * sirviendo a integraciones que no tienen tema-.
+   */
+  theme?: UserMenuThemeOptions
+}
+
+/**
+ * Mismo trazo que los íconos de lucide-react (`Sun`/`Moon`/`Monitor`) que
+ * usaba el `ThemeToggle` de la consola -ver AGENTS.md-, copiados a mano
+ * porque el paquete es `dependencies: {}` y DOM plano.
+ */
+const THEME_ICONS: Record<SxTheme, string> = {
+  light:
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>',
+  dark: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>',
+  system:
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>',
+}
+
+const THEME_ORDER: readonly SxTheme[] = ['light', 'dark', 'system']
+
+interface ThemeGroupView {
+  group: HTMLElement
+  buttons: Record<SxTheme, HTMLButtonElement>
+}
+
+function buildThemeGroup(options: UserMenuThemeOptions): ThemeGroupView {
+  const labels = { ...DEFAULT_THEME_LABELS, ...options.labels }
+
+  const group = document.createElement('div')
+  group.setAttribute('part', 'theme')
+  group.setAttribute('role', 'radiogroup')
+  group.setAttribute('aria-label', labels.label)
+
+  const buttons = {} as Record<SxTheme, HTMLButtonElement>
+
+  for (const value of THEME_ORDER) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.setAttribute('part', 'theme-option')
+    button.setAttribute('role', 'radio')
+    button.setAttribute('aria-checked', String(value === options.value))
+    button.setAttribute('aria-label', labels[value])
+    button.innerHTML = THEME_ICONS[value]
+    buttons[value] = button
+    group.appendChild(button)
+  }
+
+  return { group, buttons }
 }
 
 interface UserMenuView {
@@ -158,7 +283,7 @@ interface UserMenuView {
   profileEmail: HTMLElement
   profileUsername: HTMLElement
   accountLink: HTMLAnchorElement
-  logoutHereButton: HTMLButtonElement
+  theme: ThemeGroupView | null
   logoutEverywhereButton: HTMLButtonElement
   /** Primer elemento focuseable del panel, en el orden en que aparece -a donde va el foco al abrir. */
   firstFocusable: HTMLElement
@@ -201,18 +326,21 @@ function buildView(root: ShadowRoot, options: UserMenuOptions): UserMenuView {
   accountLink.target = options.accountLinkTarget ?? '_blank'
   accountLink.rel = 'noopener'
 
-  // Dos salidas separadas, con el alcance de cada una escrito -no insinuado-:
-  // quien está en una máquina prestada y ve un único "cerrar sesión" se va
-  // creyendo que salió de todo. Ver AGENTS.md y el comentario de
+  // Una sola salida, global: cerrar sesión significa salir del dispositivo,
+  // no de "esta app". Ver AGENTS.md y el comentario de
   // `core/client.ts#LogoutOptions`.
-  const logoutHereButton = buildLogoutItem('logout-here-button', labels.signOutHereTitle, labels.signOutHereDescription)
   const logoutEverywhereButton = buildLogoutItem(
     'logout-everywhere-button',
     labels.signOutEverywhereTitle,
     labels.signOutEverywhereDescription,
   )
 
-  panel.append(profile, accountLink, logoutHereButton, logoutEverywhereButton)
+  // Grupo de tema entre el link de cuenta y la acción destructiva -que queda
+  // última-. Sin `options.theme` no se renderiza: el paquete sigue
+  // sirviendo a integraciones que no tienen tema.
+  const themeGroup = options.theme ? buildThemeGroup(options.theme) : null
+
+  panel.append(profile, accountLink, ...(themeGroup ? [themeGroup.group] : []), logoutEverywhereButton)
   details.append(summary, panel)
   root.append(style, details)
 
@@ -224,7 +352,7 @@ function buildView(root: ShadowRoot, options: UserMenuOptions): UserMenuView {
     profileEmail,
     profileUsername,
     accountLink,
-    logoutHereButton,
+    theme: themeGroup,
     logoutEverywhereButton,
     firstFocusable: accountLink,
   }
@@ -279,23 +407,40 @@ export function renderUserMenu(root: ShadowRoot, client: SolvorxSessionSource, o
     if (view.details.open) view.firstFocusable.focus()
   }
 
-  function onLogoutHereClick(): void {
-    closeMenu()
-    void client.logout({ scope: 'here' })
-  }
-
   function onLogoutEverywhereClick(): void {
     closeMenu()
     void client.logout({ scope: 'everywhere' })
   }
 
+  // El menú se queda con el seleccionado -inicializado con `theme.value` en
+  // `buildThemeGroup()`, actualizado acá antes de llamar a `onChange`-: es el
+  // único control de tema después de este cambio, así que no hace falta que
+  // la app vuelva a pisar la opción `theme` para reflejar un click. El panel
+  // NO se cierra -`onDocumentClick` ya ignora todo lo que esté dentro de
+  // `view.details`, y acá no se llama a `closeMenu()`-.
+  const onThemeOptionClicks: Array<[HTMLButtonElement, () => void]> = []
+  if (view.theme && options.theme) {
+    const themeGroup = view.theme
+    const themeOptions = options.theme
+    for (const value of THEME_ORDER) {
+      const button = themeGroup.buttons[value]
+      const onClick = (): void => {
+        for (const [otherValue, otherButton] of Object.entries(themeGroup.buttons) as [SxTheme, HTMLButtonElement][]) {
+          otherButton.setAttribute('aria-checked', String(otherValue === value))
+        }
+        themeOptions.onChange(value)
+      }
+      button.addEventListener('click', onClick)
+      onThemeOptionClicks.push([button, onClick])
+    }
+  }
+
   document.addEventListener('click', onDocumentClick)
   document.addEventListener('keydown', onKeydown)
   view.details.addEventListener('toggle', onToggle)
-  view.logoutHereButton.addEventListener('click', onLogoutHereClick)
   view.logoutEverywhereButton.addEventListener('click', onLogoutEverywhereClick)
 
-  function applyUser(user: UserInfo | null): void {
+  function applyUser(user: SessionUser | null): void {
     view.triggerAvatar.replaceChildren(
       createAvatarElement({ name: user?.name ?? '', pictureUrl: user?.picture ?? null, size: '1.75rem' }),
     )
@@ -305,7 +450,7 @@ export function renderUserMenu(root: ShadowRoot, client: SolvorxSessionSource, o
     view.profileUsername.textContent = user ? `@${user.preferred_username}` : ''
   }
 
-  function applyStatus(status: AuthStatus, user: UserInfo | null): void {
+  function applyStatus(status: AuthStatus, user: SessionUser | null): void {
     const host = root.host as HTMLElement
     host.hidden = status !== 'authenticated'
 
@@ -321,8 +466,8 @@ export function renderUserMenu(root: ShadowRoot, client: SolvorxSessionSource, o
     document.removeEventListener('click', onDocumentClick)
     document.removeEventListener('keydown', onKeydown)
     view.details.removeEventListener('toggle', onToggle)
-    view.logoutHereButton.removeEventListener('click', onLogoutHereClick)
     view.logoutEverywhereButton.removeEventListener('click', onLogoutEverywhereClick)
+    for (const [button, onClick] of onThemeOptionClicks) button.removeEventListener('click', onClick)
   }
 }
 
@@ -383,6 +528,15 @@ export class SxUserMenu extends HTMLElementBase {
 
   set accountLinkTarget(value: '_self' | '_blank' | undefined) {
     this.#options = { ...this.#options, accountLinkTarget: value }
+    this.#bind()
+  }
+
+  get theme(): UserMenuThemeOptions | undefined {
+    return this.#options.theme
+  }
+
+  set theme(value: UserMenuThemeOptions | undefined) {
+    this.#options = { ...this.#options, theme: value }
     this.#bind()
   }
 

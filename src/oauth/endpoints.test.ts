@@ -67,31 +67,6 @@ describe('buildAuthorizeUrl', () => {
     expect(new URL(url).searchParams.get('prompt')).toBe('login')
   })
 
-  it('no agrega sxorg si no se pasó', () => {
-    const url = buildAuthorizeUrl(ISSUER, {
-      clientId: 'c',
-      redirectUri: 'http://localhost:3002/callback',
-      scopes: ['openid'],
-      state: 's',
-      codeChallenge: 'ch',
-    })
-
-    expect(new URL(url).searchParams.has('sxorg')).toBe(false)
-  })
-
-  it('agrega sxorg solo cuando se pasó explícitamente', () => {
-    const url = buildAuthorizeUrl(ISSUER, {
-      clientId: 'c',
-      redirectUri: 'http://localhost:3002/callback',
-      scopes: ['openid'],
-      state: 's',
-      codeChallenge: 'ch',
-      sxorg: 'clinica-central',
-    })
-
-    expect(new URL(url).searchParams.get('sxorg')).toBe('clinica-central')
-  })
-
   it('no modifica redirect_uri -regla 6: SXMS la compara byte a byte-', () => {
     const url = buildAuthorizeUrl(ISSUER, {
       clientId: 'c',
@@ -213,12 +188,29 @@ describe('exchangeCode / refreshTokens / revokeToken / userinfo / ssoLogout', ()
     expect(init?.headers).toEqual({ Authorization: 'Bearer the-access-token' })
   })
 
-  it('ssoLogout: POST con credentials: include', async () => {
-    await ssoLogout(ISSUER)
+  it('ssoLogout: POST con credentials: include y el client_id de la cookie a limpiar', async () => {
+    await ssoLogout(ISSUER, 'sx-account-web')
 
     const [url, init] = lastFetchCall()
     expect(url).toBe(`${ISSUER}/v1/public/oauth/logout`)
     expect(init?.method).toBe('POST')
     expect(init?.credentials).toBe('include')
+    const body = bodyParams(init)
+    expect(body.get('client_id')).toBe('sx-account-web')
+    // Sin `accessToken` no se manda Authorization: queda la vía de la cookie.
+    expect(init?.headers).toEqual({ 'Content-Type': 'application/x-www-form-urlencoded' })
+    // El body es solo `client_id`: no hay ninguna organización que elegir.
+    expect([...body.keys()]).toEqual(['client_id'])
+  })
+
+  it('ssoLogout: con accessToken manda el bearer — la vía que no depende de la cookie', async () => {
+    await ssoLogout(ISSUER, 'sx-account-web', { accessToken: 'the-access-token' })
+
+    const [, init] = lastFetchCall()
+    expect(init?.headers).toEqual({
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: 'Bearer the-access-token',
+    })
+    expect(bodyParams(init).get('client_id')).toBe('sx-account-web')
   })
 })

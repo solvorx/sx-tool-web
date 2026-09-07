@@ -59,8 +59,6 @@ export function buildAuthorizeUrl(
     codeChallenge: string
     /** `'login'` fuerza reautenticación aunque haya sesión SSO abierta. */
     prompt?: 'login'
-    /** Organization.code a resolver — solo tiene efecto si el cliente OAuth es multiOrganization. */
-    sxorg?: string
   },
 ): string {
   const query = new URLSearchParams({
@@ -72,7 +70,6 @@ export function buildAuthorizeUrl(
     code_challenge: params.codeChallenge,
     code_challenge_method: 'S256',
     ...(params.prompt ? { prompt: params.prompt } : {}),
-    ...(params.sxorg ? { sxorg: params.sxorg } : {}),
   })
 
   return `${issuer}${OAUTH_PATH}/authorize?${query.toString()}`
@@ -170,18 +167,37 @@ export function userinfo(issuer: string, accessToken: string): Promise<UserInfo>
   })
 }
 
+export interface SsoLogoutOptions {
+  /**
+   * Access token de la sesión a cerrar. **Mandalo siempre que lo tengas**: es
+   * lo que hace que el logout no dependa de la cookie -ver el docblock-.
+   */
+  accessToken?: string
+}
+
 /**
- * Revoca la `SsoSession` del navegador -y cascadea a todas las sesiones de
- * proyecto que nacieron de ese login-, pero **solo si la cookie `sx_sso`
- * viaja**. Es `SameSite=Lax`: en una app bajo `*.solvorx.com` viaja porque es
- * same-site; en una app de un dominio externo, un `fetch` cross-site no la
- * manda y este POST llega sin cookie y no revoca nada. Es la limitación
- * documentada en el README -el arreglo es un `GET` con
- * `post_logout_redirect_uri`, que es trabajo de backend fuera de este plan.
+ * Revoca la `SsoSession` del navegador y cascadea a todas las sesiones de
+ * proyecto que nacieron de ese login.
+ *
+ * **Pasá `accessToken`.** Con él, el backend saca la sesión SSO de la sesión de
+ * proyecto que el token nombra: no hace falta que la cookie viaje. Sin él queda
+ * la vía de la cookie, que falla en silencio cuando `sx_sso` (`SameSite=Lax`)
+ * no viaja en un `fetch` cross-site — una app en `localhost:3001` contra un AS
+ * en `localhost:9000` es cross-site.
+ *
+ * `client_id` sigue siendo obligatorio: identifica a la app que pide el logout.
  */
-export async function ssoLogout(issuer: string): Promise<void> {
+export async function ssoLogout(
+  issuer: string,
+  clientId: string,
+  options: SsoLogoutOptions = {},
+): Promise<void> {
   await requestRaw<Record<string, boolean>>(`${issuer}${OAUTH_PATH}/logout`, {
     method: 'POST',
+    headers: options.accessToken
+      ? { ...FORM_HEADERS, Authorization: `Bearer ${options.accessToken}` }
+      : FORM_HEADERS,
     credentials: 'include',
+    body: form({ client_id: clientId }),
   })
 }

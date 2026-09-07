@@ -19,6 +19,7 @@ import {
   exchangeCode,
   refreshTokens,
   revokeToken,
+  ssoLogout,
   userinfo,
   type TokenResponse,
   type UserInfo,
@@ -39,7 +40,7 @@ export interface SolvorxServerClientOptions {
 
 export interface SolvorxServerClient {
   /** URL de `/authorize`. Redirigir top-level -nunca `fetch`-, igual que en el barril de navegador. */
-  buildAuthorizeUrl(params: { state: string; codeChallenge: string; prompt?: 'login'; sxorg?: string }): string
+  buildAuthorizeUrl(params: { state: string; codeChallenge: string; prompt?: 'login' }): string
   /** Canje del código por tokens, con `client_secret` si el cliente lo tiene configurado. */
   exchangeCode(params: { code: string; codeVerifier: string }): Promise<TokenResponse>
   /** Renovación con `grant_type=refresh_token`. Serializar del lado de quien llama -acá no hay lock. */
@@ -48,6 +49,17 @@ export interface SolvorxServerClient {
   revokeToken(token: string): Promise<void>
   /** Perfil OIDC estándar del titular del access token. */
   userinfo(accessToken: string): Promise<UserInfo>
+  /**
+   * Cierra la sesión SSO del navegador y, en cascada, todas las sesiones de
+   * proyecto que nacieron de ese login. Se identifica con el access token.
+   *
+   * Server-to-server a propósito. Hacerlo desde el navegador obliga a que la
+   * cookie `sx_sso_<org>` viaje, y no viaja si la app y el Authorization
+   * Server no comparten sitio -`*.account.localhost` contra `localhost` en
+   * dev-; además obliga a saber en qué organización está la sesión. Con el
+   * token, el backend deduce las dos cosas de la sesión que el token nombra.
+   */
+  ssoLogout(accessToken: string): Promise<void>
 }
 
 const DEFAULT_SCOPES = ['openid', 'profile', 'email']
@@ -70,7 +82,6 @@ export function createSolvorxServerClient(options: SolvorxServerClientOptions): 
         state: params.state,
         codeChallenge: params.codeChallenge,
         ...(params.prompt ? { prompt: params.prompt } : {}),
-        ...(params.sxorg ? { sxorg: params.sxorg } : {}),
       }),
 
     exchangeCode: (params) =>
@@ -87,6 +98,8 @@ export function createSolvorxServerClient(options: SolvorxServerClientOptions): 
     revokeToken: (token) => revokeToken(issuer, clientId, token, clientSecret),
 
     userinfo: (accessToken) => userinfo(issuer, accessToken),
+
+    ssoLogout: (accessToken) => ssoLogout(issuer, clientId, { accessToken }),
   }
 }
 
@@ -104,3 +117,4 @@ export {
 } from '../http/error'
 export type { ClientErrorCode } from '../http/error'
 export type { TokenResponse, UserInfo } from '../oauth/endpoints'
+export { isRevokedSessionError, withSessionRecovery } from './session-recovery'

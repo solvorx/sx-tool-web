@@ -95,7 +95,7 @@ src/
 ├── oauth/             pkce · endpoints (fetch contra /v1/public/oauth/*) · transaction · claims
 ├── session/           token-store (interfaz TokenStorage + 3 impls) · refresh (el lock) · sync (BroadcastChannel)
 ├── http/              request (fetch + unwrap de los dos formatos de respuesta) · error (SolvorxError)
-└── ui/                login-button · user-menu (+ mountUserMenu) · avatar · styles (CSS custom properties)
+└── ui/                login-button · user-menu (+ mountUserMenu, sección de tema opcional) · avatar · styles (CSS custom properties)
 ```
 
 - `server/index.ts` no duplica lógica de OAuth: `createSolvorxServerClient` es una fachada delgada sobre
@@ -115,7 +115,11 @@ src/
   `BroadcastChannel`, `session/sync.ts` no sabe de refresh. Si una extensión necesita que dos de
   estos módulos se hablen directamente, probablemente tiene que pasar por `client.ts`.
 - `ui/user-menu.ts` tiene una sola función de render (`renderUserMenu`) que usan tanto la clase
-  `SxUserMenu` como `mountUserMenu()`. No duplicar el armado del DOM entre las dos.
+  `SxUserMenu` como `mountUserMenu()`. No duplicar el armado del DOM entre las dos. La sección de
+  tema (`part='theme'`, entre `account-link` y la salida global) solo se renderiza si se pasa la
+  opción `theme` -sin ella el paquete sigue sirviendo a integraciones sin tema-. El menú se queda
+  con el seleccionado internamente al clickear -no hace falta que la app vuelva a pisar la opción
+  `theme` para reflejar el cambio, así que `mountUserMenu()` sigue devolviendo solo `() => void`.
 
 ## 4. Tests
 
@@ -139,10 +143,10 @@ src/
 - `server/index.test.ts`: que `clientSecret` viaje en `exchangeCode`/`refreshTokens`/`revokeToken`
   cuando está configurado, y que no viaje cuando no lo está -es la superficie que existe
   específicamente para eso, así que es la que más falta que la cubra un test.
-- `ui/user-menu.test.ts`: las dos salidas del menú llaman a `logout()` con el `scope` que
-  corresponde, los labels custom pisan los defaults sin romper los que no se pisan, el foco entra al
-  panel al abrir, y `createSolvorxBffClient` funciona como `SolvorxSessionSource` sin ningún token en
-  el navegador (se stubea `fetch` global, nunca `oauth/endpoints.ts`).
+- `ui/user-menu.test.ts`: la única salida del menú llama a `logout({ scope: 'everywhere' })`, los
+  labels custom pisan los defaults sin romper los que no se pisan, el foco entra al panel al abrir,
+  y `createSolvorxBffClient` funciona como `SolvorxSessionSource` sin ningún token en el navegador
+  (se stubea `fetch` global, nunca `oauth/endpoints.ts`).
 
 Para mockear `../oauth/endpoints` en un test: `vi.mock('../oauth/endpoints', async (importOriginal)
 => ({ ...(await importOriginal()), exchangeCode: vi.fn(), ... }))`, para conservar `buildAuthorizeUrl`
@@ -172,6 +176,7 @@ respecto.
 | Qué | Dónde |
 |---|---|
 | Consumidor del barril `./server` (cliente confidencial + BFF) | `../sx-account-web`, vía `createSolvorxServerClient` (`src/lib/api/oauth.ts` antes de migrar) y `createSolvorxBffClient` (`src/layouts/app-layout.tsx`) |
-| Convenciones del backend sobre OAuth | `../sx-management-service/docs/OAUTH-CLIENTS.md`, `docs/AUTH-FLOWS.md` |
+| Cómo SXMS trabaja con este paquete | `../sx-management-service/docs/SX-TOOL-WEB.md` |
+| Convenciones del backend sobre OAuth | `../sx-management-service/docs/integration/01-console.md` (clientes OAuth), `docs/integration/03-frontend.md` |
 | Cliente OAuth de prueba (ya seedeado) | `sx-console-web`, público, PKCE, `redirect_uri = http://localhost:3002/callback` -ver `../sx-management-service/prisma/seed.ts` |
 | Swagger de los endpoints usados | `http://localhost:9000/documentation/public` (una vez con SXMS corriendo) |
