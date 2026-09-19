@@ -121,6 +121,21 @@ check(
   `package.json tiene dependencies (${dependencyNames.join(', ')}) -el paquete promete cero dependencias de runtime.`,
 )
 
+// ── Interno: nunca al registry público ────────────────────────────────────
+// El paquete implementa el cliente OAuth de SolvorX y su README está escrito
+// para quien ya tiene el contexto de SXMS. Volver a `access: public` o al
+// registry de npmjs no rompe nada en el build -falla acá o no falla en ningún
+// lado hasta que el paquete ya está publicado, que es tarde.
+const publishConfig = pkg.publishConfig ?? {}
+check(
+  publishConfig.access === 'restricted',
+  `publishConfig.access es "${publishConfig.access ?? 'ausente'}" -tiene que ser "restricted": el paquete es interno.`,
+)
+check(
+  publishConfig.registry === 'https://npm.pkg.github.com',
+  `publishConfig.registry es "${publishConfig.registry ?? 'ausente'}" -tiene que ser GitHub Packages, no npmjs.org.`,
+)
+
 if (failures.length > 0) {
   console.error('check:package falló:\n')
   for (const failure of failures) console.error(`  ✗ ${failure}`)
@@ -128,5 +143,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `check:package OK -${EXPECTED_BROWSER_EXPORTS.length} exports de navegador + ${EXPECTED_SERVER_EXPORTS.length} de servidor verificados en ESM y CJS, .d.ts/.d.cts presentes, dependencies vacío.`,
+  `check:package OK -${EXPECTED_BROWSER_EXPORTS.length} exports de navegador + ${EXPECTED_SERVER_EXPORTS.length} de servidor verificados en ESM y CJS, .d.ts/.d.cts presentes, dependencies vacío, publish restringido a GitHub Packages.`,
 )

@@ -1,5 +1,9 @@
 # @solvorx/sx-tool-web
 
+> **Paquete interno de SolvorX.** Vive en GitHub Packages, no en npmjs.org, y no está pensado para
+> integradores de afuera: implementa el cliente OAuth contra `sx-management-service` y este README
+> asume el contexto de SXMS. Si llegaste acá buscando integrar tu app con SolvorX, escribinos.
+
 Integración de identidad de SolvorX para apps web: login, sesión persistente, datos del usuario y
 logout contra `sx-management-service` (SXMS), sin volver a escribir PKCE. Cliente público para apps
 sin backend propio, y cliente confidencial (subpath `./server`) para apps que sí lo tienen.
@@ -9,6 +13,18 @@ TypeScript vanilla, **cero dependencias de runtime**. Funciona desde JS plano, R
 ---
 
 ## Instalación
+
+El scope `@solvorx` resuelve contra GitHub Packages, así que hace falta un `.npmrc` en la app que lo
+consume (los tres frontends de SolvorX ya lo tienen commiteado):
+
+```
+@solvorx:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${NPM_TOKEN}
+```
+
+El token no va en el archivo: `NPM_TOKEN` se lee del entorno — de los secrets del repo en el CI, y
+de las variables del proyecto en Vercel, donde `vercel build` corre el `pnpm install`. Sin esa
+variable el install falla con un **401**, no con un "paquete no encontrado".
 
 ```bash
 pnpm add @solvorx/sx-tool-web
