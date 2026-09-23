@@ -171,7 +171,23 @@ respecto.
 
 ---
 
-## 6. Referencias
+## 6. Ramas y publicación
+
+Las ramas largas son `main` (canal `latest`) y `beta` (canal `beta`), nada más: una librería no tiene
+entornos sino versiones, así que no lleva `dev`/`prod` como las apps. Las ramas de feature salen de
+`main`. La versión del `package.json` **es** el canal -`X.Y.Z` en `main`, `X.Y.Z-beta.N` en `beta`- y
+`scripts/release-channel.mjs` frena el release si no coincide con la rama del commit, con el tag o con
+la marca de pre-release. El flujo completo está en "Publicar" del README.
+
+- **Nunca `pnpm publish` a mano.** Se publica creando un release en GitHub. Publicar desde una máquina
+  se saltea el chequeo de canal, y lo publicado no queda atado a ningún commit: `0.5.0` salió así a
+  npmjs, y ningún tag del repo dice de qué commit.
+- **Después de cada estable, `main` se mergea a `beta`.** Si no, la próxima beta arranca de un código
+  más viejo que lo publicado.
+
+---
+
+## 7. Referencias
 
 | Qué | Dónde |
 |---|---|

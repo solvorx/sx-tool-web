@@ -15,7 +15,7 @@ TypeScript vanilla, **cero dependencias de runtime**. Funciona desde JS plano, R
 ## Instalación
 
 El scope `@solvorx` resuelve contra GitHub Packages, así que hace falta un `.npmrc` en la app que lo
-consume (los tres frontends de SolvorX ya lo tienen commiteado):
+consume:
 
 ```
 @solvorx:registry=https://npm.pkg.github.com
@@ -401,3 +401,48 @@ manualmente (la config de `issuer`/`clientId`/`redirectUri` es editable desde la
 así que acá la vieja vía de la cookie funcionaba y la de ahora también. Es justamente por eso que
 este entorno **nunca mostró** el bug que motivó el cambio: hacía falta un host que no compartiera
 site con SXMS, como `<org>.account.localhost:3001` contra `localhost:9000`.
+
+## Publicar
+
+Dos ramas largas, una por canal. El trabajo sale de `main` en ramas de feature y vuelve por PR.
+
+| Rama | Versión en `package.json` | Canal (dist-tag) | Quién la instala |
+|---|---|---|---|
+| `main` | `X.Y.Z` | `latest` | cualquier `pnpm add @solvorx/sx-tool-web` |
+| `beta` | `X.Y.Z-beta.N` | `beta` | sólo quien la pide: `@beta` o la versión exacta |
+
+No hay `dev` ni `prod` como en las apps: una app tiene entornos donde corre el mismo código, una
+librería tiene versiones, y el que elige cuál usa es quien la instala.
+
+Se publica **creando un release en GitHub** -nunca con `pnpm publish` desde una máquina, que se
+saltea los chequeos-. El tag lo crea el propio release (*Create new tag*, sobre la rama que
+corresponde). `publish.yaml` corre `scripts/release-channel.mjs` antes de instalar nada y frena el
+job si el tag no es `v` + la versión del `package.json`, si una estable no está en `main`, si una beta
+no está en `beta`, o si la marca de *pre-release* no coincide con la versión.
+
+- **Una estable.** La versión sube a `X.Y.Z` en el PR a `main`. Mergeado, release con tag `vX.Y.Z`
+  sobre `main`, sin marcar *pre-release*.
+- **Una beta.** Los cambios a probar entran a `beta` por PR, con la versión en `X.Y.Z-beta.N` -`N`
+  sube en cada beta del mismo `X.Y.Z`-. Release con tag `vX.Y.Z-beta.N` sobre `beta`, marcado *Set
+  as a pre-release*.
+- **Promover una beta.** PR `beta → main`, y en ese mismo PR la versión pierde el `-beta.N`. Si se
+  olvida, el release desde `main` se frena.
+- **Después de cada estable, `main` se mergea a `beta`.** La próxima beta tiene que arrancar de lo
+  que ya está publicado; si no, reintroduce lo que se arregló en `main`.
+
+Antes de crear el release se puede correr el mismo chequeo que corre el CI, parado en el commit que
+va a llevar el tag:
+
+```bash
+git fetch origin && git switch --detach origin/main   # o origin/beta
+RELEASE_TAG=v0.7.0 RELEASE_PRERELEASE=false node scripts/release-channel.mjs
+git switch -                                          # volver a donde estabas
+```
+
+Del lado de quien instala: `^0.6.0` **no** matchea `0.7.0-beta.1` -semver deja los prereleases
+afuera de los rangos-, así que nadie se come una beta por accidente. Para probar una en el entorno
+`dev` de una app se fija la versión exacta:
+
+```bash
+pnpm add @solvorx/sx-tool-web@0.7.0-beta.1
+```
