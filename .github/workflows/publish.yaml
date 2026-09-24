@@ -1,5 +1,12 @@
 name: Publish
 
+# Publicar un release en GitHub es la única forma de publicar el paquete. El canal lo decide
+# `scripts/release-channel.mjs`, no el formulario del release:
+#
+#   commit en main + versión X.Y.Z                              → dist-tag `latest`
+#   commit en beta + versión X.Y.Z-beta.N + marcado pre-release → dist-tag `beta`
+#
+# Cualquier otra combinación frena el job antes de instalar nada. Ver "Publicar" en el README.
 on:
   release:
     types: [published]
@@ -9,16 +16,33 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
+      # `packages: write` es lo que habilita publicar al registry de GitHub. El
+      # `GITHUB_TOKEN` del job alcanza: no hace falta un PAT ni el secreto de npm.
+      packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Historia completa: el canal sale de si el commit del tag está en `main` o en
+          # `beta`, y un checkout superficial no trae esas ramas.
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
+          # GitHub Packages, no npmjs.org: el paquete es interno de SolvorX.
+          registry-url: https://npm.pkg.github.com
+          scope: '@solvorx'
+
+      # Antes del install a propósito: un release mal armado falla en segundos, no
+      # después de lint, tipos y tests.
+      - name: Resolver el canal
+        id: channel
+        run: node scripts/release-channel.mjs
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
 
       - run: pnpm install --frozen-lockfile
 
@@ -26,6 +50,8 @@ jobs:
       - run: pnpm check:types
       - run: pnpm test
 
-      - run: pnpm publish --no-git-checks
+      # `--tag` siempre explícito: el default de `publish` es `latest`, así que una beta
+      # publicada sin él pasaría a ser lo que instala cualquier `pnpm add` sin versión.
+      - run: pnpm publish --no-git-checks --tag ${{ steps.channel.outputs.dist_tag }}
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
