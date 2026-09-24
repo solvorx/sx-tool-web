@@ -19,12 +19,17 @@ consume:
 
 ```
 @solvorx:registry=https://npm.pkg.github.com
-//npm.pkg.github.com/:_authToken=${NPM_TOKEN}
+//npm.pkg.github.com/:_authToken=${GITHUB_PACKAGES_TOKEN}
 ```
 
-El token no va en el archivo: `NPM_TOKEN` se lee del entorno — de los secrets del repo en el CI, y
-de las variables del proyecto en Vercel, donde `vercel build` corre el `pnpm install`. Sin esa
-variable el install falla con un **401**, no con un "paquete no encontrado".
+El token no va en el archivo: `GITHUB_PACKAGES_TOKEN` se lee del entorno — de la terminal de quien
+desarrolla, y de las variables del proyecto en Vercel, donde `vercel build` corre el `pnpm install`.
+Es un token **clásico** de GitHub con `read:packages` -los *fine-grained* no sirven para este
+registry-, y el mismo alcanza para todas las apps. Sin esa variable el install falla con un **401**,
+no con un "paquete no encontrado".
+
+No se llama `NPM_TOKEN` a propósito: ése era el secreto de este repo para publicar en npmjs.org, y
+dos credenciales distintas con el mismo nombre terminan en rotar o borrar la equivocada.
 
 ```bash
 pnpm add @solvorx/sx-tool-web
